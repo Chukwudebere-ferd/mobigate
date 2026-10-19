@@ -1,0 +1,8 @@
+packages:
+  - 'frontend'
+  - 'auth'
+
+# pnpm 12 requires build scripts to be explicitly allowed. esbuild's
+# postinstall places its platform binary, which Vite requires to run.
+allowBuilds:
+  esbuild: true
