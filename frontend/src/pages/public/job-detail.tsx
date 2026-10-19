@@ -5,6 +5,7 @@ import {
   CalendarClock,
   ChevronRight,
   CircleAlert,
+  Clock,
   FileText,
   IdCard,
   MapPin,
@@ -15,7 +16,7 @@ import {
 } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -47,13 +48,22 @@ const DOCUMENTS = [
   },
 ]
 
+/** Whole days left until `deadline`; negative once it has passed. */
+function daysUntil(deadline: string | null): number | null {
+  if (!deadline) return null
+  const target = new Date(deadline).getTime()
+  if (Number.isNaN(target)) return null
+  return Math.ceil((target - Date.now()) / 86_400_000)
+}
+
 export function JobDetailPage() {
   const { slug } = useParams<{ slug: string }>()
 
   const { data: job, isLoading, isError } = useQuery({
     queryKey: ['public', 'job', slug],
-    queryFn: () => publicApi.getJob(slug ?? ''),
+    queryFn: async () => (await publicApi.getJob(slug ?? '')) ?? null,
     enabled: Boolean(slug),
+    retry: false,
   })
 
   if (isLoading) {
@@ -90,9 +100,9 @@ export function JobDetailPage() {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean)
-  const deadlinePassed = job.deadline_at
-    ? new Date(job.deadline_at).getTime() < Date.now()
-    : false
+  const remaining = daysUntil(job.deadline_at)
+  const deadlinePassed = remaining !== null && remaining < 0
+  const deadlineNear = remaining !== null && remaining >= 0 && remaining <= 7
 
   return (
     <div className="bg-ink-50">
@@ -223,15 +233,23 @@ export function JobDetailPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {deadlinePassed ? (
-                  <div className="flex gap-2.5 rounded-lg border border-warning-200 bg-warning-50 p-3">
+                  <div className="flex gap-2.5 rounded-lg border border-danger-200 bg-danger-50 p-3">
                     <CircleAlert
                       aria-hidden
-                      className="size-4 shrink-0 text-warning-700"
+                      className="size-4 shrink-0 text-danger-700"
                     />
-                    <p className="text-xs text-warning-900">
+                    <p className="text-xs text-danger-900">
                       Applications for this role closed{' '}
                       {untilNow(job.deadline_at)}. Send us an email if you
                       would still like to be considered.
+                    </p>
+                  </div>
+                ) : deadlineNear ? (
+                  <div className="flex gap-2.5 rounded-lg border border-warning-200 bg-warning-50 p-3">
+                    <Clock aria-hidden className="size-4 shrink-0 text-warning-700" />
+                    <p className="text-xs text-warning-900">
+                      Applications close {untilNow(job.deadline_at)} —{' '}
+                      {formatDate(job.deadline_at)}. Apply soon.
                     </p>
                   </div>
                 ) : (
@@ -275,16 +293,22 @@ export function JobDetailPage() {
                 </div>
               </CardContent>
               <div className="border-t border-ink-200 bg-ink-50/60 px-5 py-4">
-                <Link
-                  to={`/apply/${job.slug}`}
-                  className={buttonVariants({
-                    size: 'lg',
-                    className: 'w-full',
-                  })}
-                >
-                  <Upload aria-hidden />
-                  Start application
-                </Link>
+                {deadlinePassed ? (
+                  <Button size="lg" className="w-full" disabled>
+                    Applications closed
+                  </Button>
+                ) : (
+                  <Link
+                    to={`/apply/${job.slug}`}
+                    className={buttonVariants({
+                      size: 'lg',
+                      className: 'w-full',
+                    })}
+                  >
+                    <Upload aria-hidden />
+                    Start application
+                  </Link>
+                )}
                 <p className="mt-2 flex items-center justify-center gap-1.5 text-2xs text-ink-500">
                   <Briefcase aria-hidden className="size-3.5" />
                   {job.openings} {job.openings === 1 ? 'position' : 'positions'}{' '}

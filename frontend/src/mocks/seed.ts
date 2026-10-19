@@ -442,6 +442,59 @@ export const applications: Application[] = applicantSeeds.map((seed, i) => {
   }
 })
 
+// The demo applicant (usr-app-1) applies to several roles so the applicant
+// portal shows the full range of states, including a shortlist with a
+// confirmation message (BR-08) and a rejection.
+const demoApplicant: Omit<Application, 'id' | 'application_number'> = {
+  tenant_id: 'ten-1',
+  job_id: 'job-3',
+  applicant_id: 'usr-app-1',
+  first_name: 'Ngozi',
+  last_name: 'Obi',
+  email: 'ngozi.obi@example.com',
+  phone: '+2348061122334',
+  gender: 'Female',
+  date_of_birth: '1996-04-12',
+  location_id: 'loc-city-lekki',
+  address_line: '12 Admiralty Way',
+  qualification: 'BSc Computer Science',
+  cv_document_id: 'doc-cv-13',
+  photo_document_id: 'doc-photo-13',
+  status: 'shortlisted',
+  submitted_at: daysAgo(16),
+  updated_at: daysAgo(6),
+  job_title: 'Finance Officer',
+  job_slug: 'finance-officer',
+  location_name: 'Lekki, Lagos',
+  cv_file_name: 'Ngozi_Obi_CV.pdf',
+}
+
+applications.push(
+  {
+    ...demoApplicant,
+    id: 'app-13',
+    application_number: 'APP/LA/2026/0013',
+    job_id: 'job-3',
+    status: 'shortlisted',
+    submitted_at: daysAgo(16),
+    updated_at: daysAgo(6),
+    job_title: 'Finance Officer',
+    job_slug: 'finance-officer',
+  },
+  {
+    ...demoApplicant,
+    id: 'app-14',
+    application_number: 'APP/LA/2026/0014',
+    job_id: 'job-4',
+    status: 'rejected',
+    submitted_at: daysAgo(40),
+    updated_at: daysAgo(29),
+    job_title: 'Frontend Developer',
+    job_slug: 'frontend-developer',
+    cv_file_name: 'Ngozi_Obi_CV_2026.pdf',
+  },
+)
+
 export const applicationEvents: ApplicationEvent[] = [
   {
     id: 'ev-1',
@@ -557,6 +610,20 @@ export const interviews: InterviewAnnouncement[] = [
 ]
 
 export const shortlists: Shortlist[] = [
+  {
+    id: 'sl-5',
+    application_id: 'app-13',
+    job_id: 'job-3',
+    message:
+      'Congratulations, you have been shortlisted for the Finance Officer role. Please report to Mobigate House, 2nd Floor, Ikeja on the scheduled interview date with your qualification certificates and two references.',
+    message_template_id: 'tpl-1',
+    status: 'active',
+    created_by: 'usr-admin-1',
+    created_at: daysAgo(6),
+    revoked_at: null,
+    applicant_name: 'Ngozi Obi',
+    job_title: 'Finance Officer',
+  },
   {
     id: 'sl-1',
     application_id: 'app-2',

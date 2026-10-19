@@ -26,6 +26,17 @@ VITE_API_MODE=live pnpm dev
 
 ## Screens
 
+### Design review
+
+| Route | Screen |
+|---|---|
+| `/preview` | Screen index — every screen, with a role switcher and review notes |
+
+A developer-facing index of all 20 screens, grouped by portal. Each entry
+links to the route, names the source file, and carries a note on what to
+review. The role switcher sets the mock session, which matters because the
+admin, applicant and staff portals render different content per role.
+
 ### Public careers site
 
 | Route | Screen |
@@ -67,6 +78,10 @@ VITE_API_MODE=live pnpm dev
 
 ## Reviewing a portal
 
+Open **`/preview`** for the screen index. It lists every screen with a link,
+the source file, and a note on what to review, and has a role switcher in the
+top right.
+
 The mock session picks a role from the URL. Visit a portal's route directly,
 or set the role from the browser console:
 
@@ -76,6 +91,18 @@ location.reload()
 ```
 
 Roles: `super_admin` · `admin` · `applicant` · `staff`.
+
+### Demo data
+
+| Account | Shows |
+|---|---|
+| Ngozi Obi (applicant) | Shortlisted on Finance Officer, plus a rejected application |
+| Tunde Adebisi (staff) | Appointed, Staff ID `STA/LA/2026/0001` |
+| Aisha Adeyemi (admin) | Lagos state admin |
+| Chidi Okonkwo (super admin) | Platform admin |
+
+Working access codes for `/staff/onboarding` (matched on the last four
+characters): `MGK7M2`, `5R5T1P`, `8H2N7Q`.
 
 ## Architecture
 
@@ -92,6 +119,7 @@ src/
 ├── mocks/           Seed data for mock mode
 ├── pages/           Route components, grouped by portal
 ├── providers/       Session provider
+├── routes.tsx       The route table, shared by the app and the test harness
 └── types/           Domain types, mirroring the Go models
 ```
 
@@ -128,3 +156,5 @@ bank details being visible only to the record owner and administrators.
 | `pnpm preview` | Serve the production build |
 | `pnpm lint` | Oxlint |
 | `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm render-check` | Render every route server-side and report failures |
+| `pnpm dump-route -- /preview` | Print a route's rendered text |

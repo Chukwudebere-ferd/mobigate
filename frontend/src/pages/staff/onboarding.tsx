@@ -18,7 +18,7 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { useState } from 'react'
-import { Controller, useForm } from 'react-hook-form'
+import { Controller, useForm, useWatch } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
@@ -307,7 +307,6 @@ function DetailsPhase({
     control,
     register,
     handleSubmit,
-    watch,
     setValue,
     formState: { errors },
   } = useForm<StaffDetailsValues>({
@@ -343,12 +342,12 @@ function DetailsPhase({
     },
   })
 
-  const countryId = watch('country_id')
-  const stateId = watch('state_id')
-  const lgaId = watch('lga_id')
-  const cityId = watch('city_id')
-  const idDocument = watch('id_document')
-  const certificates = watch('qualification_certificates')
+  const countryId = useWatch({ control, name: 'country_id' })
+  const stateId = useWatch({ control, name: 'state_id' })
+  const lgaId = useWatch({ control, name: 'lga_id' })
+  const cityId = useWatch({ control, name: 'city_id' })
+  const idDocument = useWatch({ control, name: 'id_document' })
+  const certificates = useWatch({ control, name: 'qualification_certificates' })
 
   const states = locations.filter((l) => l.parent_id === countryId)
   const lgas = locations.filter((l) => l.parent_id === stateId)

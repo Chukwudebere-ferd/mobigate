@@ -1,21 +1,17 @@
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowRight,
-  Briefcase,
-  Building,
-  CalendarClock,
-  CircleCheck,
-  ClipboardCheck,
-  Clock,
+  Building2,
+  CalendarCheck,
+  ClipboardList,
+  KeyRound,
   MapPin,
-  Search,
-  SearchX,
-  Sparkles,
+  ShieldCheck,
   Users,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 
+import { ProductVisual } from '@/components/public/product-visual'
 import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
 import {
@@ -26,150 +22,75 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { EmptyState } from '@/components/ui/empty-state'
-import { Field, Input, Select } from '@/components/ui/input'
+import { StatCard } from '@/components/ui/stat-card'
 import { EmploymentCategoryBadge } from '@/components/ui/status-badges'
-import { employmentCategoryLabels, locationPath, publicApi } from '@/lib/api'
+import { locationPath, publicApi } from '@/lib/api'
 import { formatDate, untilNow } from '@/lib/format'
-import type { EmploymentCategory, Job } from '@/types/domain'
+import { auditLogs } from '@/mocks/seed'
 
 /**
- * The public Job model carries no `department_id`, so the careers site groups
- * roles by team using the title. Replace with a server-provided department
- * once the Job contract carries one.
+ * The public landing page.
+ *
+ * This is the company and platform front door, not a job board. It states
+ * what MGM-Portal is, shows the product, and only then offers the careers
+ * route. The full vacancy list lives at /careers.
  */
-const DEPARTMENT_RULES: { name: string; keywords: string[] }[] = [
+
+const CAPABILITIES = [
   {
-    name: 'Engineering',
-    keywords: ['engineer', 'developer', 'software', 'data', 'platform'],
-  },
-  { name: 'Finance', keywords: ['finance', 'account', 'audit', 'payroll'] },
-  {
-    name: 'Operations',
-    keywords: ['operation', 'logistics', 'supply', 'procurement'],
+    title: 'Recruitment pipeline',
+    icon: ClipboardList,
+    description:
+      'Post a role, publish it to the careers page, and take applications with a CV and photograph. Every applicant is issued a sequential application number on submission.',
   },
   {
-    name: 'Marketing',
-    keywords: ['marketing', 'brand', 'communications', 'growth'],
+    title: 'Interview & shortlisting',
+    icon: CalendarCheck,
+    description:
+      'Publish dated interview announcements scoped to a single job. Shortlist in bulk, with a confirmation message that is mandatory and stored verbatim against each candidate.',
   },
-  { name: 'Legal', keywords: ['legal', 'counsel', 'compliance'] },
   {
-    name: 'Human Resources',
-    keywords: ['human resource', 'hr', 'people', 'talent', 'recruit'],
+    title: 'Access codes & onboarding',
+    icon: KeyRound,
+    description:
+      'Issue single-use, time-boxed, revocable access codes, held only as hashes. Redeeming one creates the staff record, allocates the Staff ID and writes the audit entry together.',
+  },
+  {
+    title: 'Personnel records',
+    icon: ShieldCheck,
+    description:
+      'Structured, queryable staff records across bio-data, banking, guarantor, next of kin and documents. Bank and family details stay visible only to the owner and administrators.',
   },
 ]
 
-const STEPS = [
-  {
-    title: 'Apply',
-    description:
-      'Submit your details, CV and a passport photograph. You get an application number straight away.',
-    icon: ClipboardCheck,
-  },
-  {
-    title: 'Interview',
-    description:
-      'Shortlisted candidates are invited to an interview session at Mobigate House, Lagos.',
-    icon: CalendarClock,
-  },
-  {
-    title: 'Shortlist',
-    description:
-      'Interview feedback and references are reviewed before the shortlist is confirmed.',
-    icon: CircleCheck,
-  },
-  {
-    title: 'Appointment',
-    description:
-      'Successful applicants receive an access code and begin staff onboarding.',
-    icon: Briefcase,
-  },
+const GUARANTEES = [
+  'Every admin account is approved by a super admin before it can act',
+  'A shortlisted application locks for applicant editing',
+  'Five failed redemption attempts lock an access code',
+  'Codes expire on a configurable clock — 14 days by default',
+  'Every status change is written to an append-only audit log',
 ]
 
-interface RoleRow {
-  job: Job
-  department: string
-  locationName: string
-  category: EmploymentCategory | null
-}
-
-function departmentOf(job: Job): string {
-  const title = job.title.toLowerCase()
-  const match = DEPARTMENT_RULES.find((rule) =>
-    rule.keywords.some((keyword) => title.includes(keyword)),
-  )
-  return match ? match.name : 'General'
-}
-
-function excerpt(text: string, length = 160): string {
-  if (text.length <= length) return text
-  return `${text.slice(0, length).trimEnd()}…`
-}
+const SCOPE = [
+  { label: 'Country', value: 'Nigeria', note: 'One hierarchy, one tree' },
+  { label: 'State', value: 'Lagos · Abuja (FCT)', note: 'Own admin boundary' },
+  { label: 'Local Government Area', value: '5 seeded LGAs', note: 'Own candidate pool' },
+  { label: 'City / Town', value: '8 cities & towns', note: 'Own ID sequence' },
+]
 
 export function HomePage() {
-  const [search, setSearch] = useState('')
-  const [department, setDepartment] = useState('all')
-  const [location, setLocation] = useState('all')
-  const [jobType, setJobType] = useState('all')
-
-  const { data: jobs = [], isLoading } = useQuery({
+  const { data: jobs = [] } = useQuery({
     queryKey: ['public', 'jobs'],
     queryFn: () => publicApi.listJobs(),
   })
 
-  const rows = useMemo<RoleRow[]>(
-    () =>
-      jobs.map((job) => ({
-        job,
-        department: departmentOf(job),
-        locationName: job.location_name ?? locationPath(job.location_id),
-        category: job.employment_category,
-      })),
-    [jobs],
-  )
-
-  const departments = useMemo(
-    () => [...new Set(rows.map((row) => row.department))].sort(),
-    [rows],
-  )
-  const locations = useMemo(
-    () => [...new Set(rows.map((row) => row.locationName))].sort(),
-    [rows],
-  )
-  const categories = useMemo(
-    () =>
-      [
-        ...new Set(
-          rows
-            .map((row) => row.category)
-            .filter((value): value is EmploymentCategory => value !== null),
-        ),
-      ].sort(),
-    [rows],
-  )
-
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    return rows.filter((row) => {
-      if (department !== 'all' && row.department !== department) return false
-      if (location !== 'all' && row.locationName !== location) return false
-      if (jobType !== 'all' && row.category !== jobType) return false
-      if (!term) return true
-      return (
-        row.job.title.toLowerCase().includes(term) ||
-        row.job.description.toLowerCase().includes(term) ||
-        row.locationName.toLowerCase().includes(term) ||
-        row.department.toLowerCase().includes(term)
-      )
-    })
-  }, [rows, search, department, location, jobType])
-
-  const resetFilters = () => {
-    setSearch('')
-    setDepartment('all')
-    setLocation('all')
-    setJobType('all')
-  }
+  const openRoles = jobs.slice(0, 4)
+  const departments = new Set(openRoles.map((job) => job.title)).size
+  const locations = new Set(
+    openRoles.map((job) => job.location_name ?? locationPath(job.location_id)),
+  ).size
+  const openings = jobs.reduce((sum, job) => sum + job.openings, 0)
+  const recentAudit = auditLogs.slice(0, 4)
 
   return (
     <div className="bg-ink-50">
@@ -180,195 +101,294 @@ export function HomePage() {
           className="pointer-events-none absolute inset-0 bg-grid opacity-70"
         />
         <div className="relative mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
-          <Badge variant="brand" className="gap-1.5">
-            <Sparkles aria-hidden />
-            Careers at Mobigate Group
-          </Badge>
-          <h1 className="mt-4 max-w-3xl text-3xl font-semibold tracking-tight text-ink-900 text-balance sm:text-4xl">
-            Build the systems that move people and goods across Nigeria
-          </h1>
-          <p className="mt-4 max-w-2xl text-base text-ink-600">
-            We hire engineers, operators, finance, legal and marketing
-            professionals to run the Group&apos;s recruitment, mobility and
-            personnel platforms. Pick a role, apply online, and track your
-            application every step of the way.
-          </p>
+          <div className="grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
+            <div>
+              <Badge variant="brand" className="gap-1.5">
+                <Building2 aria-hidden />
+                MGM-Portal · Recruitment &amp; Staff Management
+              </Badge>
 
-          <div className="mt-6 flex flex-wrap items-center gap-2">
-            <Badge variant="neutral" className="gap-1.5">
-              <Briefcase aria-hidden />
-              {rows.length} open roles
-            </Badge>
-            <Badge variant="neutral" className="gap-1.5">
-              <MapPin aria-hidden />
-              {locations.length} locations
-            </Badge>
-            <Badge variant="neutral" className="gap-1.5">
-              <Building aria-hidden />
-              {departments.length} departments
-            </Badge>
+              <h1 className="mt-5 text-3xl font-semibold tracking-tight text-ink-900 text-balance sm:text-4xl lg:text-[2.75rem] lg:leading-[1.15]">
+                From application to Staff ID — every step on the record
+              </h1>
+
+              <p className="mt-5 max-w-xl text-base text-ink-600 text-balance">
+                MGM-Portal runs the Group&apos;s recruitment and personnel
+                workflow — postings, applications, interviews, shortlisting,
+                access codes and staff onboarding. Built for a group operating
+                across states, and designed so that nobody reaches an active
+                staff account without a human verification step.
+              </p>
+
+              <div className="mt-7 flex flex-wrap items-center gap-3">
+                <Link
+                  to="/careers"
+                  className={buttonVariants({ size: 'lg' })}
+                >
+                  View open roles
+                  <ArrowRight aria-hidden />
+                </Link>
+                <a
+                  href="#platform"
+                  className={buttonVariants({ variant: 'outline', size: 'lg' })}
+                >
+                  See what it does
+                </a>
+              </div>
+
+              <dl className="mt-9 grid max-w-lg grid-cols-3 gap-4 border-t border-ink-200 pt-6">
+                <div>
+                  <dt className="text-2xs font-medium tracking-wide text-ink-500 uppercase">
+                    Open roles
+                  </dt>
+                  <dd className="mt-1 text-xl font-semibold text-ink-900 tabular">
+                    {jobs.length}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-2xs font-medium tracking-wide text-ink-500 uppercase">
+                    Openings
+                  </dt>
+                  <dd className="mt-1 text-xl font-semibold text-ink-900 tabular">
+                    {openings}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-2xs font-medium tracking-wide text-ink-500 uppercase">
+                    Locations
+                  </dt>
+                  <dd className="mt-1 text-xl font-semibold text-ink-900 tabular">
+                    {locations}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+
+            <ProductVisual />
+          </div>
+        </div>
+      </section>
+
+      {/* -- Scope --------------------------------------------------------- */}
+      <section className="border-b border-ink-200 bg-white">
+        <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {SCOPE.map((item, index) => (
+              <div key={item.label} className="flex gap-3">
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-brand-50 text-xs font-semibold text-brand-700 ring-1 ring-brand-100">
+                  {index + 1}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-2xs font-medium tracking-wide text-ink-500 uppercase">
+                    {item.label}
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium text-ink-900">
+                    {item.value}
+                  </p>
+                  <p className="text-xs text-ink-500">{item.note}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-6 text-sm text-ink-500">
+            Each state runs its own administration boundary, candidate pool and
+            ID sequence — so <span className="font-mono text-ink-700">APP/LA/2026/0001</span>{' '}
+            belongs to Lagos, and the next state starts its own run.
+          </p>
+        </div>
+      </section>
+
+      {/* -- Capabilities -------------------------------------------------- */}
+      <section id="platform" className="scroll-mt-20 border-b border-ink-200">
+        <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+          <div className="max-w-2xl">
+            <p className="text-2xs font-semibold tracking-wider text-brand-700 uppercase">
+              What the platform does
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-tight text-ink-900 sm:text-3xl">
+              One system for the whole employment journey
+            </h2>
+            <p className="mt-3 text-base text-ink-600">
+              Four connected modules, one auditable record. An applicant who
+              enters at the careers page is the same person in the staff
+              directory a few weeks later.
+            </p>
           </div>
 
-          {/* -- Search & filters -- */}
-          <Card className="mt-8">
-            <CardContent className="p-4 sm:p-5">
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <Field
-                  label="Search roles"
-                  htmlFor="role-search"
-                  className="md:col-span-2"
-                >
-                  <div className="relative">
-                    <Search
-                      aria-hidden
-                      className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400"
-                    />
-                    <Input
-                      id="role-search"
-                      type="search"
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder="Title, keyword or location"
-                      className="pl-9"
-                    />
+          <div className="mt-10 grid gap-4 sm:grid-cols-2">
+            {CAPABILITIES.map((capability) => (
+              <Card key={capability.title} className="h-full">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700 ring-1 ring-brand-100">
+                      <capability.icon aria-hidden className="size-4.5" />
+                    </span>
+                    <CardTitle className="text-base">
+                      {capability.title}
+                    </CardTitle>
                   </div>
-                </Field>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm leading-relaxed text-ink-600">
+                    {capability.description}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </section>
 
-                <Field label="Department" htmlFor="department-filter">
-                  <Select
-                    id="department-filter"
-                    value={department}
-                    onChange={(event) => setDepartment(event.target.value)}
-                  >
-                    <option value="all">All departments</option>
-                    {departments.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+      {/* -- Verification before access ------------------------------------ */}
+      <section className="border-b border-ink-200 bg-white">
+        <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+          <div className="grid items-start gap-10 lg:grid-cols-2 lg:gap-14">
+            <div>
+              <p className="text-2xs font-semibold tracking-wider text-brand-700 uppercase">
+                Verification before access
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-ink-900 sm:text-3xl">
+                No staff account without a human in the loop
+              </h2>
+              <p className="mt-3 text-base text-ink-600">
+                Staff records are not created by a form submission. They are
+                created by an access code that a named administrator issued,
+                which the candidate redeemed — and all four facts are recorded.
+              </p>
 
-                <Field label="Location" htmlFor="location-filter">
-                  <Select
-                    id="location-filter"
-                    value={location}
-                    onChange={(event) => setLocation(event.target.value)}
-                  >
-                    <option value="all">All locations</option>
-                    {locations.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
+              <ul className="mt-7 space-y-3">
+                {GUARANTEES.map((guarantee) => (
+                  <li key={guarantee} className="flex gap-3">
+                    <ShieldCheck
+                      aria-hidden
+                      className="mt-0.5 size-4 shrink-0 text-brand-600"
+                    />
+                    <span className="text-sm text-ink-700">{guarantee}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
 
-                <Field label="Job type" htmlFor="job-type-filter">
-                  <Select
-                    id="job-type-filter"
-                    value={jobType}
-                    onChange={(event) => setJobType(event.target.value)}
-                  >
-                    <option value="all">All job types</option>
-                    {categories.map((category) => (
-                      <option key={category} value={category}>
-                        {employmentCategoryLabels[category]}
-                      </option>
+            {/* -- Audit trail -- */}
+            <div>
+              <Card className="overflow-hidden">
+                <CardHeader className="bg-ink-50/60">
+                  <CardTitle>Audit trail</CardTitle>
+                  <CardDescription>
+                    Append-only. Every entry carries the actor, the action and
+                    the time.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <ul className="divide-y divide-ink-100">
+                    {recentAudit.map((entry) => (
+                      <li
+                        key={entry.id}
+                        className="flex items-start justify-between gap-4 px-5 py-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-mono text-xs font-medium text-ink-900">
+                            {entry.action}
+                          </p>
+                          <p className="mt-0.5 truncate text-2xs text-ink-500">
+                            {entry.actor_name} · {entry.entity_type}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-2xs text-ink-400">
+                          {formatDate(entry.created_at)}
+                        </span>
+                      </li>
                     ))}
-                  </Select>
-                </Field>
+                  </ul>
+                </CardContent>
+              </Card>
+
+              <div className="mt-4 flex items-center gap-4 rounded-xl border border-brand-200 bg-brand-50/60 p-5">
+                <p className="text-3xl font-semibold text-brand-800 tabular">
+                  Zero
+                </p>
+                <p className="text-sm text-ink-700">
+                  staff accounts created without a verification event and a
+                  redeemed access code on record.
+                </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
       </section>
 
       {/* -- Open roles ---------------------------------------------------- */}
-      <section className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-semibold tracking-tight text-ink-900">
-              Open roles
-            </h2>
-            <p className="mt-1 text-sm text-ink-500">
-              {filtered.length} of {rows.length} positions available
-            </p>
+      <section className="border-b border-ink-200">
+        <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="max-w-2xl">
+              <p className="text-2xs font-semibold tracking-wider text-brand-700 uppercase">
+                Careers
+              </p>
+              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-ink-900 sm:text-3xl">
+                The Group is hiring
+              </h2>
+              <p className="mt-3 text-base text-ink-600">
+                Engineering, operations, finance, legal and marketing. Apply
+                online and keep your application number — it is your reference
+                for every update.
+              </p>
+            </div>
+            <Link
+              to="/careers"
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              All {jobs.length} open roles
+              <ArrowRight aria-hidden />
+            </Link>
           </div>
-          <Link
-            to="/applicant"
-            className={buttonVariants({ variant: 'outline', size: 'sm' })}
-          >
-            Track my application
-            <ArrowRight aria-hidden />
-          </Link>
-        </div>
 
-        {isLoading ? (
-          <p className="py-12 text-center text-sm text-ink-500">
-            Loading open roles…
-          </p>
-        ) : filtered.length === 0 ? (
-          <Card className="mt-6">
-            <EmptyState
-              icon={SearchX}
-              title="No roles match your search"
-              description="Try a different keyword, location or job type — new roles are published every week."
-              action={
-                <button
-                  type="button"
-                  onClick={resetFilters}
-                  className={buttonVariants({ variant: 'outline' })}
-                >
-                  Clear filters
-                </button>
-              }
-            />
-          </Card>
-        ) : (
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            {filtered.map((row) => (
-              <Card key={row.job.id} className="flex flex-col">
+          <div className="mt-9 grid gap-4 sm:grid-cols-2">
+            {openRoles.map((job) => (
+              <Card key={job.id} className="flex flex-col">
                 <CardHeader>
                   <div className="flex items-start justify-between gap-3">
                     <CardTitle className="text-base">
                       <Link
-                        to={`/jobs/${row.job.slug}`}
+                        to={`/jobs/${job.slug}`}
                         className="hover:text-brand-700"
                       >
-                        {row.job.title}
+                        {job.title}
                       </Link>
                     </CardTitle>
-                    {row.category ? (
-                      <EmploymentCategoryBadge category={row.category} />
+                    {job.employment_category ? (
+                      <EmploymentCategoryBadge
+                        category={job.employment_category}
+                      />
                     ) : null}
                   </div>
                   <CardDescription className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
                     <span className="inline-flex items-center gap-1.5">
                       <MapPin aria-hidden className="size-3.5" />
-                      {row.locationName}
+                      {job.location_name ?? locationPath(job.location_id)}
                     </span>
                     <span className="inline-flex items-center gap-1.5">
                       <Users aria-hidden className="size-3.5" />
-                      {row.job.openings} openings
+                      {job.openings} openings
                     </span>
                     <span className="inline-flex items-center gap-1.5">
-                      <Clock aria-hidden className="size-3.5" />
-                      Closes {untilNow(row.job.deadline_at)}
+                      {untilNow(job.deadline_at)}
                     </span>
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="flex-1">
                   <p className="text-sm text-ink-600">
-                    {excerpt(row.job.description)}
+                    {job.description.length > 150
+                      ? `${job.description.slice(0, 150).trimEnd()}…`
+                      : job.description}
                   </p>
                 </CardContent>
                 <CardFooter className="justify-between">
                   <span className="text-2xs text-ink-400">
-                    Posted {formatDate(row.job.publish_at ?? row.job.created_at)}
+                    Posted {formatDate(job.publish_at ?? job.created_at)}
                   </span>
                   <Link
-                    to={`/jobs/${row.job.slug}`}
+                    to={`/jobs/${job.slug}`}
                     className={buttonVariants({ variant: 'secondary', size: 'sm' })}
                   >
                     View role
@@ -378,65 +398,76 @@ export function HomePage() {
               </Card>
             ))}
           </div>
-        )}
-      </section>
-
-      {/* -- How it works -------------------------------------------------- */}
-      <section className="border-y border-ink-200 bg-white">
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-          <h2 className="text-xl font-semibold tracking-tight text-ink-900">
-            How it works
-          </h2>
-          <p className="mt-1 max-w-2xl text-sm text-ink-500">
-            Every application follows the same four stages, so you always know
-            where you stand.
-          </p>
-
-          <ol className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {STEPS.map((step, index) => (
-              <li key={step.title} className="relative">
-                <div className="flex items-center gap-3">
-                  <span className="flex size-9 items-center justify-center rounded-full bg-brand-600 text-sm font-semibold text-white">
-                    {index + 1}
-                  </span>
-                  <step.icon aria-hidden className="size-5 text-ink-400" />
-                </div>
-                <h3 className="mt-4 text-sm font-semibold text-ink-900">
-                  {step.title}
-                </h3>
-                <p className="mt-1.5 text-sm text-ink-600">{step.description}</p>
-              </li>
-            ))}
-          </ol>
         </div>
       </section>
 
-      {/* -- Closing CTA --------------------------------------------------- */}
-      <section className="bg-brand-950">
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-12 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+      {/* -- Board numbers ------------------------------------------------- */}
+      <section className="border-b border-ink-200 bg-white">
+        <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
           <div className="max-w-2xl">
-            <h2 className="text-xl font-semibold tracking-tight text-white">
-              Already applied, or joining the Group as staff?
+            <h2 className="text-xl font-semibold tracking-tight text-ink-900">
+              On the board right now
+            </h2>
+            <p className="mt-1 text-sm text-ink-500">
+              Live figures taken from the current vacancy list.
+            </p>
+          </div>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard
+              label="Open roles"
+              value={jobs.length}
+              tone="brand"
+              icon={ClipboardList}
+            />
+            <StatCard
+              label="Openings"
+              value={openings}
+              tone="info"
+              icon={Users}
+            />
+            <StatCard
+              label="Departments"
+              value={departments}
+              tone="accent"
+              icon={Building2}
+            />
+            <StatCard
+              label="Locations"
+              value={locations}
+              tone="success"
+              icon={MapPin}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* -- CTA ------------------------------------------------------------ */}
+      <section className="bg-brand-950">
+        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-14 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-2xl">
+            <h2 className="text-2xl font-semibold tracking-tight text-white">
+              Ready to hire, or ready to apply?
             </h2>
             <p className="mt-2 text-sm text-brand-100">
-              Applicants can follow review, interview and shortlist updates
-              from the applicant portal. Staff members use the staff portal to
-              complete onboarding and access the personnel records.
+              Administrators manage postings, applications, interviews,
+              shortlists and access codes from the admin console. Applicants
+              follow every stage from the applicant portal. Appointed staff
+              complete onboarding in the staff portal.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <Link
-              to="/applicant"
-              className={buttonVariants({ variant: 'primary' })}
+              to="/careers"
+              className={buttonVariants({ variant: 'primary', size: 'lg' })}
             >
-              Applicant portal
+              View open roles
               <ArrowRight aria-hidden />
             </Link>
             <Link
-              to="/staff"
-              className={buttonVariants({ variant: 'secondary' })}
+              to="/applicant"
+              className={buttonVariants({ variant: 'secondary', size: 'lg' })}
             >
-              Staff portal
+              Applicant portal
             </Link>
           </div>
         </div>

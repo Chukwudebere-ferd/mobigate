@@ -98,8 +98,14 @@ export function UserStatusBadge({ status }: { status: UserStatus }) {
 
 export function EmploymentCategoryBadge({
   category,
+  className,
 }: {
   category: EmploymentCategory
+  className?: string
 }) {
-  return <Badge variant={categoryTone[category]}>{capitalize(category)}</Badge>
+  return (
+    <Badge variant={categoryTone[category]} className={className}>
+      {capitalize(category)}
+    </Badge>
+  )
 }
