@@ -200,6 +200,13 @@
     background-size: 24px 24px;
   }
 
+  /* The same dotted texture, inverted for dark surfaces. */
+  .bg-grid-light {
+    background-image:
+      radial-gradient(circle at 1px 1px, var(--color-brand-100) 1px, transparent 0);
+    background-size: 24px 24px;
+  }
+
   .text-balance {
     text-wrap: balance;
   }

@@ -19,7 +19,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 const ROUTES = [
   ['/preview', 'Design review index'],
-  ['/', 'Careers landing'],
+  ['/', 'Company landing'],
+  ['/careers', 'Careers listing'],
   ['/jobs/senior-backend-engineer', 'Job detail'],
   ['/apply/senior-backend-engineer', 'Application form'],
   ['/application/received', 'Application received'],

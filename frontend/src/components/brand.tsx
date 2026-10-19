@@ -1,11 +1,12 @@
 import { cn } from '@/lib/cn'
+import logo from '@/assets/mobiface-logo.svg'
 
 /**
  * The Mobigate Group wordmark.
  *
- * Drawn as inline SVG rather than shipped as a raster image so it stays
- * sharp at any size, inherits the current text colour, and costs nothing to
- * download.
+ * The artwork is the Mobiface lockup — the stacked-cards mark and the
+ * wordmark — shipped as SVG so it stays sharp at any size, inherits the
+ * brand colour exactly, and costs a few kilobytes to download.
  */
 export function Brand({
   className,
@@ -15,20 +16,21 @@ export function Brand({
   showTagline?: boolean
 }) {
   return (
-    <span className={cn('inline-flex items-center gap-2.5', className)}>
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-        M
-      </span>
-      <span className="leading-tight">
-        <span className="block text-sm font-semibold tracking-tight text-ink-900">
-          Mobigate Group
+    <span className={cn('inline-flex items-center gap-3', className)}>
+      <img
+        src={logo}
+        alt="Mobiface"
+        width={112}
+        height={34}
+        className="h-[26px] w-auto shrink-0"
+      />
+      {showTagline ? (
+        <span className="hidden border-l border-ink-200 pl-3 text-2xs leading-tight text-ink-500 lg:block">
+          Recruitment &amp; Staff
+          <br />
+          Management
         </span>
-        {showTagline && (
-          <span className="block text-2xs text-ink-500">
-            Recruitment &amp; Staff Management
-          </span>
-        )}
-      </span>
+      ) : null}
     </span>
   )
 }
