@@ -81,7 +81,7 @@ export function HeroCollage({ className }: { className?: string }) {
         </div>
 
         {/* -- Staff ID -- */}
-        <Card className="lg:col-start-2 lg:row-start-2 lg:-mt-6">
+        <Card className="lg:col-start-2 lg:row-start-2">
           <Eyebrow icon={ShieldCheck}>Staff ID issued</Eyebrow>
           <p className="mt-3 font-mono text-base font-semibold tracking-wider text-ink-900">
             {staff.staff_id}
@@ -129,7 +129,7 @@ function Eyebrow({
   children: React.ReactNode
 }) {
   return (
-    <span className="flex items-center gap-1.5 text-2xs font-semibold tracking-wider text-ink-500 uppercase">
+    <span className="flex items-center gap-1.5 text-2xs font-semibold tracking-wider whitespace-nowrap text-ink-500 uppercase">
       <Icon aria-hidden className="size-3.5 text-brand-600" />
       {children}
     </span>

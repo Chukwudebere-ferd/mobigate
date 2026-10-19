@@ -11,6 +11,16 @@ const NAV_LINKS = [
   { to: '/staff', label: 'Staff portal' },
 ]
 
+/** Repeated in the footer ticker. Points at real routes only. */
+const TICKER_LINKS = [
+  { to: '/careers', label: 'Open roles' },
+  { to: '/applicant', label: 'Track your application' },
+  { to: '/staff', label: 'Staff portal' },
+  { to: '/', label: 'How MGM-Portal works' },
+  { to: '/applicant/interviews', label: 'Interview announcements' },
+  { to: '/careers', label: 'Apply online' },
+]
+
 /** Marketing shell for the public site. */
 export function PublicShell() {
   // Sampled once on mount so the footer year does not change on re-render.
@@ -54,12 +64,36 @@ export function PublicShell() {
         <Outlet />
       </main>
 
-      <footer className="border-t border-ink-200 bg-ink-50">
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+      <footer className="bg-brand-950 text-brand-200">
+        {/* -- Link ticker -- */}
+        <div className="overflow-hidden border-b border-brand-900 py-3">
+          <div className="flex w-max animate-marquee motion-reduce:animate-none">
+            {[0, 1].map((copy) => (
+              <div
+                key={copy}
+                aria-hidden={copy === 1}
+                className="flex items-center gap-8 pr-8"
+              >
+                {TICKER_LINKS.map((item) => (
+                  <Link
+                    key={item.label}
+                    to={item.to}
+                    className="text-2xs font-medium tracking-wide whitespace-nowrap text-brand-300 transition-colors hover:text-white"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* -- Columns -- */}
+        <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
           <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
             <div className="lg:col-span-2">
-              <Brand showTagline />
-              <p className="mt-4 max-w-sm text-sm leading-relaxed text-ink-600">
+              <Brand showTagline tone="light" />
+              <p className="mt-4 max-w-sm text-sm leading-relaxed text-brand-300">
                 MGM-Portal is the recruitment and staff management platform of
                 the Mobigate Group — postings, applications, interviews,
                 shortlisting, access codes and personnel records, with every
@@ -85,14 +119,14 @@ export function PublicShell() {
             />
           </div>
 
-          <div className="mt-10 flex flex-col gap-3 border-t border-ink-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-2xs text-ink-400">
+          <div className="mt-10 flex flex-col gap-3 border-t border-brand-900 pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-2xs text-brand-400">
               © {year} Mobigate Group. All rights reserved.
             </p>
             {import.meta.env.DEV ? (
               <Link
                 to="/preview"
-                className="text-2xs text-ink-400 hover:text-ink-700"
+                className="text-2xs text-brand-400 hover:text-brand-100"
                 title="Developer screen index"
               >
                 Screen index
@@ -114,13 +148,16 @@ function FooterColumn({
 }) {
   return (
     <div>
-      <p className="text-2xs font-semibold tracking-wider text-ink-400 uppercase">
+      <p className="text-2xs font-semibold tracking-wider text-brand-400 uppercase">
         {title}
       </p>
       <ul className="mt-4 space-y-2.5 text-sm">
         {links.map((link) => (
           <li key={link.to}>
-            <Link to={link.to} className="text-ink-600 hover:text-ink-900">
+            <Link
+              to={link.to}
+              className="text-brand-200 transition-colors hover:text-white"
+            >
               {link.label}
             </Link>
           </li>
