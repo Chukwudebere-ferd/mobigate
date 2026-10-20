@@ -54,6 +54,11 @@ import type {
 
 const API_MODE = import.meta.env.VITE_API_MODE ?? 'mock'
 
+// The dashboard is migrated first. This lets its live queries run while the
+// remaining admin pages stay on the mock layer until their endpoints land.
+const DASHBOARD_MODE =
+  import.meta.env.VITE_DASHBOARD_MODE ?? API_MODE
+
 /** Simulated network latency so loading states are exercised in development. */
 const delay = (ms = 220) => new Promise((r) => setTimeout(r, ms))
 
@@ -203,9 +208,23 @@ export const publicApi = {
 
 export const adminApi = {
   async dashboard(): Promise<DashboardMetrics> {
-    if (API_MODE === 'live') return http.get<DashboardMetrics>('/admin/dashboard')
+    if (DASHBOARD_MODE === 'live') {
+      return http.get<DashboardMetrics>('/admin/dashboard')
+    }
     await delay()
     return dashboardMetrics
+  },
+
+  async recentApplications(limit = 5): Promise<Application[]> {
+    if (DASHBOARD_MODE === 'live') {
+      const page = await http.get<Paginated<Application>>(
+        '/admin/applications',
+        { per_page: limit },
+      )
+      return page.items
+    }
+    await delay()
+    return applications.slice(0, limit)
   },
 
   async listJobs(): Promise<Job[]> {
@@ -428,8 +447,11 @@ export const adminApi = {
   },
 
   async listInterviews(): Promise<InterviewAnnouncement[]> {
-    if (API_MODE === 'live') {
-      return http.get<InterviewAnnouncement[]>('/admin/interviews')
+    if (DASHBOARD_MODE === 'live') {
+      const response = await http.get<{ items: InterviewAnnouncement[] }>(
+        '/admin/interviews',
+      )
+      return response.items
     }
     await delay()
     return [...interviews].sort(
@@ -680,7 +702,10 @@ export const adminApi = {
   },
 
   async listAuditLogs(): Promise<AuditLog[]> {
-    if (API_MODE === 'live') return http.get<AuditLog[]>('/admin/audit-logs')
+    if (DASHBOARD_MODE === 'live') {
+      const response = await http.get<{ items: AuditLog[] }>('/admin/audit-logs')
+      return response.items
+    }
     await delay()
     return auditLogs
   },

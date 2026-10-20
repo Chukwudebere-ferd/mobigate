@@ -143,10 +143,15 @@ export function AdminDashboardPage() {
   })
   const recentApplicationsQuery = useQuery({
     queryKey: ['admin', 'applications', 'recent'],
-    queryFn: () => adminApi.listApplications({ per_page: 5 }),
+    queryFn: () => adminApi.recentApplications(5),
   })
 
-  const metrics = dashboardQuery.data
+  // A stale API process can return an empty object. Treat a response without
+  // the trend series as unavailable instead of crashing on `.slice`.
+  const metrics =
+    dashboardQuery.data && Array.isArray(dashboardQuery.data.applications_trend)
+      ? dashboardQuery.data
+      : undefined
   const now = useNow()
 
   // The API exposes a rolling 30-day series; longer ranges simply cover it all.
@@ -182,7 +187,7 @@ export function AdminDashboardPage() {
     [interviewsQuery.data, now],
   )
 
-  const recentApplications = recentApplicationsQuery.data?.items ?? []
+  const recentApplications = recentApplicationsQuery.data ?? []
 
   const tiles: MetricTile[] = metrics
     ? [

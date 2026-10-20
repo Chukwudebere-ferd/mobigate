@@ -8,8 +8,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/mobigate/mgm-portal/internal/auth"
 	"github.com/mobigate/mgm-portal/internal/codes"
@@ -187,6 +189,34 @@ func (h *Handler) submitApplication(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, models.Application{})
 }
 
+// adminScope resolves the tenant filter for an admin request. A nil UUID
+// means "all tenants" and is reserved for Super Admins; a state Admin must
+// have a tenant. The session role was already checked by middleware.
+func (h *Handler) adminScope(w http.ResponseWriter, r *http.Request) (*uuid.UUID, bool) {
+	session, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return nil, false
+	}
+	if h.Store == nil {
+		writeError(w, http.StatusServiceUnavailable, "database unavailable")
+		return nil, false
+	}
+	if session.User.Role == models.RoleSuperAdmin {
+		return nil, true
+	}
+	if session.User.TenantID == "" {
+		writeError(w, http.StatusForbidden, "account has no tenant scope")
+		return nil, false
+	}
+	tenantID, err := uuid.Parse(session.User.TenantID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, "account has an invalid tenant scope")
+		return nil, false
+	}
+	return &tenantID, true
+}
+
 // currentUser returns the signed-in user's domain profile and state scope.
 // Better Auth owns the session; this response is the frontend's view of the
 // MGM user, including pending/suspended status.
@@ -272,7 +302,16 @@ func (h *Handler) completeOnboarding(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/dashboard -> 200 DashboardMetrics
-	writeJSON(w, http.StatusOK, map[string]any{})
+	scope, ok := h.adminScope(w, r)
+	if !ok {
+		return
+	}
+	metrics, err := h.Store.Dashboard(r.Context(), scope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load dashboard")
+		return
+	}
+	writeJSON(w, http.StatusOK, metrics)
 }
 
 func (h *Handler) listJobs(w http.ResponseWriter, r *http.Request) {
@@ -295,7 +334,86 @@ func (h *Handler) listApplications(w http.ResponseWriter, r *http.Request) {
 	// Query: page, per_page, search, status, job_id, state_id, lga_id,
 	//        date_from, date_to, sort, order
 	// 200 -> Paginated<Application>
-	writeJSON(w, http.StatusOK, map[string]any{})
+	scope, ok := h.adminScope(w, r)
+	if !ok {
+		return
+	}
+
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	switch status {
+	case "", "all", "pending", "shortlisted", "rejected", "appointed", "withdrawn":
+	default:
+		writeError(w, http.StatusBadRequest, "invalid status filter")
+		return
+	}
+
+	query := store.ApplicationQuery{
+		TenantID: scope,
+		Page:     queryInt(r, "page", 1),
+		PerPage:  queryInt(r, "per_page", 20),
+		Search:   strings.TrimSpace(r.URL.Query().Get("search")),
+		Status:   status,
+		Sort:     strings.TrimSpace(r.URL.Query().Get("sort")),
+		Order:    strings.TrimSpace(r.URL.Query().Get("order")),
+	}
+	if query.Status == "all" {
+		query.Status = ""
+	}
+	if query.Page < 1 {
+		query.Page = 1
+	}
+	if query.PerPage < 1 || query.PerPage > 100 {
+		query.PerPage = 20
+	}
+
+	for _, param := range []struct {
+		name string
+		dest **uuid.UUID
+	}{
+		{"job_id", &query.JobID},
+		{"lga_id", &query.LocationID},
+		{"state_id", &query.LocationID},
+	} {
+		raw := strings.TrimSpace(r.URL.Query().Get(param.name))
+		if raw == "" {
+			continue
+		}
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid "+param.name)
+			return
+		}
+		// lga_id takes precedence because it is more specific.
+		*param.dest = &parsed
+		if param.name == "lga_id" {
+			break
+		}
+	}
+
+	if raw := strings.TrimSpace(r.URL.Query().Get("date_from")); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid date_from")
+			return
+		}
+		query.DateFrom = &parsed
+	}
+	if raw := strings.TrimSpace(r.URL.Query().Get("date_to")); raw != "" {
+		parsed, err := time.Parse("2006-01-02", raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid date_to")
+			return
+		}
+		end := parsed.Add(24 * time.Hour)
+		query.DateTo = &end
+	}
+
+	page, err := h.Store.ListApplications(r.Context(), query)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load applications")
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
 }
 
 func (h *Handler) getApplication(w http.ResponseWriter, r *http.Request) {
@@ -337,7 +455,16 @@ func (h *Handler) revokeShortlist(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listInterviews(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/interviews -> 200 { "items": InterviewAnnouncement[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.InterviewAnnouncement{}})
+	scope, ok := h.adminScope(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.Store.ListInterviews(r.Context(), scope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load interviews")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (h *Handler) createInterview(w http.ResponseWriter, r *http.Request) {
@@ -434,7 +561,17 @@ func (h *Handler) listNotifications(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listAuditLogs(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/audit-logs -> 200 { "items": AuditLog[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.AuditLog{}})
+	scope, ok := h.adminScope(w, r)
+	if !ok {
+		return
+	}
+	limit := queryInt(r, "limit", 50)
+	items, err := h.Store.ListAuditLogs(r.Context(), scope, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load audit logs")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 // -- Helpers ---------------------------------------------------------------

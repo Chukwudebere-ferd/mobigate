@@ -25,10 +25,10 @@ const (
 type UserStatus string
 
 const (
-	UserStatusPending  UserStatus = "pending"
-	UserStatusActive   UserStatus = "active"
+	UserStatusPending   UserStatus = "pending"
+	UserStatusActive    UserStatus = "active"
 	UserStatusSuspended UserStatus = "suspended"
-	UserStatusDisabled UserStatus = "disabled"
+	UserStatusDisabled  UserStatus = "disabled"
 )
 
 type EmploymentCategory string
@@ -43,11 +43,11 @@ const (
 type ApplicationStatus string
 
 const (
-	ApplicationPending    ApplicationStatus = "pending"
+	ApplicationPending     ApplicationStatus = "pending"
 	ApplicationShortlisted ApplicationStatus = "shortlisted"
-	ApplicationRejected   ApplicationStatus = "rejected"
-	ApplicationAppointed  ApplicationStatus = "appointed"
-	ApplicationWithdrawn  ApplicationStatus = "withdrawn"
+	ApplicationRejected    ApplicationStatus = "rejected"
+	ApplicationAppointed   ApplicationStatus = "appointed"
+	ApplicationWithdrawn   ApplicationStatus = "withdrawn"
 )
 
 type JobStatus string
@@ -88,9 +88,9 @@ const (
 type LocationStatus string
 
 const (
-	LocationPending   LocationStatus = "pending"
-	LocationApproved  LocationStatus = "approved"
-	LocationInactive  LocationStatus = "inactive"
+	LocationPending  LocationStatus = "pending"
+	LocationApproved LocationStatus = "approved"
+	LocationInactive LocationStatus = "inactive"
 )
 
 type InterviewAudience string
@@ -120,23 +120,23 @@ const (
 // -- Entities --------------------------------------------------------------
 
 type Tenant struct {
-	ID              uuid.UUID `json:"id"`
-	Name            string    `json:"name"`
+	ID              uuid.UUID  `json:"id"`
+	Name            string     `json:"name"`
 	StateLocationID *uuid.UUID `json:"state_location_id"`
-	Status          string    `json:"status"`
-	CreatedAt       time.Time `json:"created_at"`
+	Status          string     `json:"status"`
+	CreatedAt       time.Time  `json:"created_at"`
 }
 
 type Location struct {
-	ID        uuid.UUID     `json:"id"`
-	TenantID  *uuid.UUID    `json:"tenant_id"`
-	ParentID  *uuid.UUID    `json:"parent_id"`
-	Type      LocationType  `json:"type"`
-	Name      string        `json:"name"`
-	Code      *string       `json:"code"`
-	Slug      string        `json:"slug"`
+	ID        uuid.UUID      `json:"id"`
+	TenantID  *uuid.UUID     `json:"tenant_id"`
+	ParentID  *uuid.UUID     `json:"parent_id"`
+	Type      LocationType   `json:"type"`
+	Name      string         `json:"name"`
+	Code      *string        `json:"code"`
+	Slug      string         `json:"slug"`
 	Status    LocationStatus `json:"status"`
-	CreatedAt time.Time     `json:"created_at"`
+	CreatedAt time.Time      `json:"created_at"`
 }
 
 type User struct {
@@ -157,20 +157,20 @@ type User struct {
 }
 
 type Job struct {
-	ID                 uuid.UUID          `json:"id"`
-	TenantID           uuid.UUID          `json:"tenant_id"`
-	Title              string             `json:"title"`
-	Slug               string             `json:"slug"`
-	Description        string             `json:"description"`
-	Requirements       *string            `json:"requirements"`
-	LocationID         *uuid.UUID         `json:"location_id"`
+	ID                 uuid.UUID           `json:"id"`
+	TenantID           uuid.UUID           `json:"tenant_id"`
+	Title              string              `json:"title"`
+	Slug               string              `json:"slug"`
+	Description        string              `json:"description"`
+	Requirements       *string             `json:"requirements"`
+	LocationID         *uuid.UUID          `json:"location_id"`
 	EmploymentCategory *EmploymentCategory `json:"employment_category"`
-	Openings           int                `json:"openings"`
-	PublishAt          *time.Time         `json:"publish_at"`
-	DeadlineAt         *time.Time         `json:"deadline_at"`
-	Status             JobStatus          `json:"status"`
-	CreatedBy          *uuid.UUID         `json:"created_by"`
-	CreatedAt          time.Time          `json:"created_at"`
+	Openings           int                 `json:"openings"`
+	PublishAt          *time.Time          `json:"publish_at"`
+	DeadlineAt         *time.Time          `json:"deadline_at"`
+	Status             JobStatus           `json:"status"`
+	CreatedBy          *uuid.UUID          `json:"created_by"`
+	CreatedAt          time.Time           `json:"created_at"`
 }
 
 type Application struct {
@@ -193,6 +193,10 @@ type Application struct {
 	Status            ApplicationStatus `json:"status"`
 	SubmittedAt       time.Time         `json:"submitted_at"`
 	UpdatedAt         time.Time         `json:"updated_at"`
+
+	// Derived for list display; not columns on applications.
+	JobTitle     *string `json:"job_title,omitempty"`
+	LocationName *string `json:"location_name,omitempty"`
 }
 
 type ApplicationEvent struct {
@@ -216,6 +220,10 @@ type InterviewAnnouncement struct {
 	Status       InterviewStatus   `json:"status"`
 	CreatedBy    *uuid.UUID        `json:"created_by"`
 	CreatedAt    time.Time         `json:"created_at"`
+
+	// Derived for list display; not columns on interview_announcements.
+	JobTitle       *string `json:"job_title,omitempty"`
+	ApplicantCount *int    `json:"applicant_count,omitempty"`
 }
 
 type Shortlist struct {
@@ -248,37 +256,37 @@ type AccessCode struct {
 }
 
 type StaffProfile struct {
-	ID                            uuid.UUID          `json:"id"`
-	TenantID                      uuid.UUID          `json:"tenant_id"`
-	UserID                        *uuid.UUID         `json:"user_id"`
-	StaffID                       string             `json:"staff_id"`
-	ApplicationID                 *uuid.UUID         `json:"application_id"`
-	EmploymentCategory            EmploymentCategory `json:"employment_category"`
-	FirstName                     string             `json:"first_name"`
-	LastName                      string             `json:"last_name"`
-	Email                         string             `json:"email"`
-	Phone                         string             `json:"phone"`
-	Gender                        *string            `json:"gender"`
-	DateOfBirth                   *time.Time         `json:"date_of_birth"`
-	AddressLine                   *string            `json:"address_line"`
-	LocationID                    *uuid.UUID         `json:"location_id"`
-	BankName                      *string            `json:"bank_name"`
-	BankAccountName               *string            `json:"bank_account_name"`
-	BankAccountNumber             *string            `json:"bank_account_number"`
-	GuarantorName                 *string            `json:"guarantor_name"`
-	GuarantorPhone                *string            `json:"guarantor_phone"`
-	GuarantorAddress              *string            `json:"guarantor_address"`
-	GuarantorRelationship         *string            `json:"guarantor_relationship"`
-	NextOfKinName                 *string            `json:"next_of_kin_name"`
-	NextOfKinPhone                *string            `json:"next_of_kin_phone"`
-	NextOfKinRelationship         *string            `json:"next_of_kin_relationship"`
-	DepartmentID                  *uuid.UUID         `json:"department_id"`
-	Position                      *string            `json:"position"`
-	AppointmentDate               *time.Time         `json:"appointment_date"`
-	RulesOfEngagementAcceptedAt   *time.Time         `json:"rules_of_engagement_accepted_at"`
-	Status                        StaffStatus        `json:"status"`
-	CreatedAt                     time.Time          `json:"created_at"`
-	UpdatedAt                     time.Time          `json:"updated_at"`
+	ID                          uuid.UUID          `json:"id"`
+	TenantID                    uuid.UUID          `json:"tenant_id"`
+	UserID                      *uuid.UUID         `json:"user_id"`
+	StaffID                     string             `json:"staff_id"`
+	ApplicationID               *uuid.UUID         `json:"application_id"`
+	EmploymentCategory          EmploymentCategory `json:"employment_category"`
+	FirstName                   string             `json:"first_name"`
+	LastName                    string             `json:"last_name"`
+	Email                       string             `json:"email"`
+	Phone                       string             `json:"phone"`
+	Gender                      *string            `json:"gender"`
+	DateOfBirth                 *time.Time         `json:"date_of_birth"`
+	AddressLine                 *string            `json:"address_line"`
+	LocationID                  *uuid.UUID         `json:"location_id"`
+	BankName                    *string            `json:"bank_name"`
+	BankAccountName             *string            `json:"bank_account_name"`
+	BankAccountNumber           *string            `json:"bank_account_number"`
+	GuarantorName               *string            `json:"guarantor_name"`
+	GuarantorPhone              *string            `json:"guarantor_phone"`
+	GuarantorAddress            *string            `json:"guarantor_address"`
+	GuarantorRelationship       *string            `json:"guarantor_relationship"`
+	NextOfKinName               *string            `json:"next_of_kin_name"`
+	NextOfKinPhone              *string            `json:"next_of_kin_phone"`
+	NextOfKinRelationship       *string            `json:"next_of_kin_relationship"`
+	DepartmentID                *uuid.UUID         `json:"department_id"`
+	Position                    *string            `json:"position"`
+	AppointmentDate             *time.Time         `json:"appointment_date"`
+	RulesOfEngagementAcceptedAt *time.Time         `json:"rules_of_engagement_accepted_at"`
+	Status                      StaffStatus        `json:"status"`
+	CreatedAt                   time.Time          `json:"created_at"`
+	UpdatedAt                   time.Time          `json:"updated_at"`
 }
 
 type Department struct {
@@ -288,43 +296,43 @@ type Department struct {
 }
 
 type Document struct {
-	ID          uuid.UUID  `json:"id"`
-	TenantID    *uuid.UUID `json:"tenant_id"`
-	OwnerType   string     `json:"owner_type"`
-	OwnerID     uuid.UUID  `json:"owner_id"`
-	Category    string     `json:"category"`
-	FileName    string     `json:"file_name"`
-	StorageKey  string     `json:"-"`
-	MimeType    string     `json:"mime_type"`
-	SizeBytes   int64      `json:"size_bytes"`
-	UploadedBy  *uuid.UUID `json:"uploaded_by"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID         uuid.UUID  `json:"id"`
+	TenantID   *uuid.UUID `json:"tenant_id"`
+	OwnerType  string     `json:"owner_type"`
+	OwnerID    uuid.UUID  `json:"owner_id"`
+	Category   string     `json:"category"`
+	FileName   string     `json:"file_name"`
+	StorageKey string     `json:"-"`
+	MimeType   string     `json:"mime_type"`
+	SizeBytes  int64      `json:"size_bytes"`
+	UploadedBy *uuid.UUID `json:"uploaded_by"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type MessageTemplate struct {
-	ID        uuid.UUID      `json:"id"`
-	TenantID  *uuid.UUID     `json:"tenant_id"`
-	Key       string         `json:"key"`
-	Channel   string         `json:"channel"`
-	Subject   *string        `json:"subject"`
-	Body      string         `json:"body"`
+	ID        uuid.UUID         `json:"id"`
+	TenantID  *uuid.UUID        `json:"tenant_id"`
+	Key       string            `json:"key"`
+	Channel   string            `json:"channel"`
+	Subject   *string           `json:"subject"`
+	Body      string            `json:"body"`
 	Variables map[string]string `json:"variables"`
-	CreatedAt time.Time      `json:"created_at"`
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 type Notification struct {
-	ID                uuid.UUID      `json:"id"`
-	TenantID          *uuid.UUID     `json:"tenant_id"`
-	RecipientUserID   *uuid.UUID     `json:"recipient_user_id"`
-	RecipientContact  *string        `json:"recipient_contact"`
-	Channel           string         `json:"channel"`
-	TemplateKey       *string        `json:"template_key"`
-	Payload           map[string]any `json:"payload"`
-	ProviderRef       *string        `json:"provider_ref"`
-	Status            string         `json:"status"`
-	Error             *string        `json:"error"`
-	SentAt            *time.Time     `json:"sent_at"`
-	CreatedAt         time.Time      `json:"created_at"`
+	ID               uuid.UUID      `json:"id"`
+	TenantID         *uuid.UUID     `json:"tenant_id"`
+	RecipientUserID  *uuid.UUID     `json:"recipient_user_id"`
+	RecipientContact *string        `json:"recipient_contact"`
+	Channel          string         `json:"channel"`
+	TemplateKey      *string        `json:"template_key"`
+	Payload          map[string]any `json:"payload"`
+	ProviderRef      *string        `json:"provider_ref"`
+	Status           string         `json:"status"`
+	Error            *string        `json:"error"`
+	SentAt           *time.Time     `json:"sent_at"`
+	CreatedAt        time.Time      `json:"created_at"`
 }
 
 type AuditLog struct {
@@ -339,6 +347,9 @@ type AuditLog struct {
 	IPAddress  *string        `json:"ip_address"`
 	UserAgent  *string        `json:"user_agent"`
 	CreatedAt  time.Time      `json:"created_at"`
+
+	// Derived for list display; not a column on audit_logs.
+	ActorName *string `json:"actor_name,omitempty"`
 }
 
 type IDSequence struct {

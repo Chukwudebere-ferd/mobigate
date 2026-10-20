@@ -7,6 +7,7 @@
     "dev": "pnpm --filter frontend dev",
     "dev:auth": "pnpm --filter @mgm/auth dev",
     "dev:api": "cd backend && go run ./cmd/mgm-api",
+    "seed:dev": "pnpm --filter @mgm/auth seed:dev",
     "build": "pnpm --filter frontend build",
     "lint": "pnpm --filter frontend lint",
     "typecheck": "pnpm --filter frontend exec tsc -b --noEmit"

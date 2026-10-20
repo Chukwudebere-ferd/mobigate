@@ -138,16 +138,35 @@ export function PublicShell() {
         aria-hidden
         className="relative h-[8.5vw] w-full overflow-hidden lg:h-[5.5rem]"
       >
+        {/* Static (non-animated) tint so the frosted glyphs have something
+            to refract against the white page surface. */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(65% 100% at 50% 0%, rgba(99,102,241,0.20) 0%, rgba(129,140,248,0.08) 48%, transparent 78%)',
+          }}
+        />
         <p
-          className="animate-word-sheen absolute inset-x-0 top-0 w-full bg-clip-text text-center text-[17vw] leading-none font-bold tracking-tighter whitespace-nowrap text-transparent select-none motion-reduce:animate-none lg:text-[11rem]"
+          className="animate-word-sheen absolute top-0 text-center text-[17vw] leading-none font-bold tracking-tighter whitespace-nowrap text-transparent select-none motion-reduce:animate-none lg:text-[11rem]"
           style={{
             // The sheen is the text's own fill, so the light travels through
             // the letterforms instead of across a background panel.
             backgroundImage:
-              'linear-gradient(100deg, #1e293b 0%, #475569 12%, #6366f1 26%, #a5b4fc 38%, #ffffff 48%, #818cf8 60%, #3730a3 74%, #1e1b4b 100%)',
+              'linear-gradient(100deg, rgba(67,56,202,0.30) 0%, rgba(129,140,248,0.24) 16%, rgba(191,219,254,0.34) 30%, rgba(224,231,255,0.42) 42%, rgba(148,163,184,0.30) 56%, rgba(79,70,229,0.26) 74%, rgba(49,46,129,0.32) 100%)',
             backgroundSize: '220% 100%',
             WebkitBackgroundClip: 'text',
             backgroundClip: 'text',
+            // Glass: translucent tint fill, so the page surface and the
+            // gradient wash behind it show through the letterforms.
+            // NOTE: no backdrop-filter here — it would blur the whole
+            // element box (a visible rectangle) instead of the glyphs.
+            // Stretch the letters so the wordmark spans the full page width.
+            left: '50%',
+            width: '71.5%',
+            transform: 'translateX(-50%) scaleX(1.4)',
+            transformOrigin: 'top center',
+            filter: 'drop-shadow(0 1px 2px rgba(30,27,75,0.16))',
             // Hard cut at the vertical midpoint: only the top half of the
             // letters is visible.
             WebkitMaskImage:
