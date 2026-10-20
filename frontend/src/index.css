@@ -104,6 +104,13 @@
   --animate-fade-in: fade-in 0.25s var(--ease-out-expo);
   --animate-slide-up: slide-up 0.3s var(--ease-out-expo);
   --animate-shimmer: shimmer 2s linear infinite;
+  --animate-marquee: marquee 28s linear infinite;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-fade-up: fade-up 0.7s var(--ease-out-expo) both;
+  --animate-word-sheen: word-sheen 4.5s ease-in-out infinite;
+  --animate-board-drift: board-drift 26s ease-in-out infinite alternate;
+  --animate-board-pop: board-pop 5s var(--ease-out-expo) both;
+  --animate-now-line: now-line 9s ease-in-out infinite alternate;
 }
 
 @keyframes fade-in {
@@ -132,6 +139,84 @@
   }
   to {
     background-position: 200% 0;
+  }
+}
+
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* Gentle levitation for the floating hero cards. Small amplitude so the
+   page stays calm; pairs with motion-reduce:animate-none in markup. */
+@keyframes float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Footer wordmark: a glass sheen sweeps through the letters from left to
+   right. The animation moves the text's own gradient fill, so the light
+   travels inside the letterforms and the text itself never moves.
+   Respects motion-reduce via motion-reduce:animate-none in markup. */
+@keyframes word-sheen {
+  0% {
+    background-position: 130% 0;
+  }
+  55%,
+  100% {
+    background-position: -30% 0;
+  }
+}
+
+/* Pipeline board: a slow ambient drift across the day columns, a staggered
+   pop-in for the cards, and a "now" line that sweeps the board. All
+   decorative; content stays readable with motion-reduce:animate-none. */
+@keyframes board-drift {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-4rem);
+  }
+}
+
+@keyframes board-pop {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes now-line {
+  from {
+    top: 12%;
+  }
+  to {
+    top: 82%;
   }
 }
 

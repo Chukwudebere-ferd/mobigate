@@ -42,6 +42,7 @@ import { adminApi } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatDate, formatDateTime, humanize, relativeTime } from '@/lib/format'
 import { useNow } from '@/lib/use-now'
+import { useSession } from '@/providers/session-provider'
 
 type Tone = 'brand' | 'warning' | 'info' | 'success' | 'accent'
 
@@ -114,6 +115,8 @@ function TrendTooltip({ active, payload, label }: TooltipContentProps) {
 }
 
 export function AdminDashboardPage() {
+  const { tenantName } = useSession()
+  const scopeLabel = tenantName ?? 'all states'
   const [searchParams, setSearchParams] = useSearchParams()
   const rangeParam = searchParams.get('range')
   const range: Range =
@@ -262,7 +265,7 @@ export function AdminDashboardPage() {
     <div className="space-y-6">
       <PageHeader
         title="Dashboard"
-        description="Recruitment activity for Lagos."
+        description={`Recruitment activity for ${scopeLabel}.`}
         actions={
           <>
             <label className="sr-only" htmlFor="dashboard-range">
@@ -583,7 +586,7 @@ export function AdminDashboardPage() {
             </div>
             <p className="mt-4 flex items-center gap-1.5 text-2xs text-ink-500">
               <TrendingUp className="size-3.5" aria-hidden />
-              Recruitment activity is scoped to Lagos state.
+              Recruitment activity is scoped to {scopeLabel}.
             </p>
           </CardContent>
         </Card>

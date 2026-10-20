@@ -39,15 +39,15 @@ import {
 } from '@/mocks/seed'
 
 const VIEWS = [
-  { key: 'admin', label: 'Admin console', route: '/admin/applications' },
   { key: 'applicant', label: 'Applicant portal', route: '/applicant' },
   { key: 'staff', label: 'Staff record', route: '/staff' },
+  { key: 'pipeline', label: 'Hiring pipeline', route: '/careers' },
 ] as const
 
 type ViewKey = (typeof VIEWS)[number]['key']
 
 export function ProductVisual({ className }: { className?: string }) {
-  const [view, setView] = useState<ViewKey>('admin')
+  const [view, setView] = useState<ViewKey>('applicant')
   const active = VIEWS.find((item) => item.key === view) ?? VIEWS[0]
 
   return (
@@ -66,7 +66,7 @@ export function ProductVisual({ className }: { className?: string }) {
         </div>
 
         <div className="p-4 sm:p-5">
-          {view === 'admin' ? <AdminView /> : null}
+          {view === 'pipeline' ? <PipelineView /> : null}
           {view === 'applicant' ? <ApplicantView /> : null}
           {view === 'staff' ? <StaffView /> : null}
         </div>
@@ -99,9 +99,9 @@ export function ProductVisual({ className }: { className?: string }) {
   )
 }
 
-/* -- Admin console -------------------------------------------------------- */
+/* -- Hiring pipeline (public-safe: counts + recent movement, no admin chrome) -- */
 
-function AdminView() {
+function PipelineView() {
   const recent = applications.slice(0, 4)
 
   return (

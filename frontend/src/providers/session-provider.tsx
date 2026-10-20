@@ -1,32 +1,33 @@
 import * as React from 'react'
+
 import type { Session, UserRole } from '@/types/domain'
+
+import {
+  SessionContext,
+  type SessionContextValue,
+} from './session-context'
 
 /**
  * Session state for the frontend.
  *
- * In production this is populated by Better Auth: the client holds the
- * session cookie and exposes the signed-in user. Until the Go API and auth
- * service are wired together, the provider resolves a mock session so the
- * page designs can be exercised end to end.
+ * Mock mode (the default for design review) resolves a role from the URL or
+ * localStorage. Live mode uses Better Auth for the session and asks the Go
+ * API for the authoritative MGM profile (role, tenant, approval status).
  *
- * The mock is chosen by role so each portal can be reviewed in isolation:
- *   /admin     -> admin
- *   /applicant -> applicant
- *   /staff     -> staff
+ * Set VITE_AUTH_MODE=live to use Better Auth. Data fetching is controlled
+ * separately by VITE_API_MODE.
  */
 
 const ROLE_STORAGE_KEY = 'mgm.mock.role'
+const AUTH_MODE =
+  import.meta.env.VITE_AUTH_MODE ?? import.meta.env.VITE_API_MODE ?? 'mock'
+const USE_LIVE_AUTH = AUTH_MODE === 'live'
 
-interface SessionContextValue {
-  session: Session | null
-  role: UserRole
-  isLoading: boolean
-  setRole: (role: UserRole) => void
-  signIn: (role: UserRole) => void
-  signOut: () => void
-}
-
-const SessionContext = React.createContext<SessionContextValue | null>(null)
+const LiveSessionProvider = React.lazy(() =>
+  import('./session-provider-live').then((module) => ({
+    default: module.LiveSessionProvider,
+  })),
+)
 
 const MOCK_SESSIONS: Record<UserRole, Session> = {
   super_admin: {
@@ -39,6 +40,7 @@ const MOCK_SESSIONS: Record<UserRole, Session> = {
       status: 'active',
       tenant_id: 'ten-1',
     },
+    tenant_name: 'Mobigate Group — Lagos',
   },
   admin: {
     user: {
@@ -50,6 +52,7 @@ const MOCK_SESSIONS: Record<UserRole, Session> = {
       status: 'active',
       tenant_id: 'ten-1',
     },
+    tenant_name: 'Mobigate Group — Lagos',
   },
   applicant: {
     user: {
@@ -61,6 +64,7 @@ const MOCK_SESSIONS: Record<UserRole, Session> = {
       status: 'active',
       tenant_id: 'ten-1',
     },
+    tenant_name: 'Mobigate Group — Lagos',
   },
   staff: {
     user: {
@@ -73,11 +77,15 @@ const MOCK_SESSIONS: Record<UserRole, Session> = {
       tenant_id: 'ten-1',
       staff_id: 'STA/LA/2026/0001',
     },
+    tenant_name: 'Mobigate Group — Lagos',
   },
 }
 
 function readStoredRole(): UserRole {
-  if (typeof window === 'undefined') return 'applicant'
+  // The render harness runs in Node with no URL. Default to an admin there so
+  // the guarded admin screens are still exercised; in the browser the role is
+  // derived from the route or localStorage below.
+  if (typeof window === 'undefined') return 'admin'
   const stored = window.localStorage.getItem(ROLE_STORAGE_KEY)
   if (stored && stored in MOCK_SESSIONS) return stored as UserRole
   const path = window.location.pathname
@@ -86,7 +94,7 @@ function readStoredRole(): UserRole {
   return 'applicant'
 }
 
-export function SessionProvider({ children }: { children: React.ReactNode }) {
+function MockSessionProvider({ children }: { children: React.ReactNode }) {
   const [role, setRoleState] = React.useState<UserRole>(readStoredRole)
 
   const setRole = React.useCallback((next: UserRole) => {
@@ -101,21 +109,25 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [setRole],
   )
 
-  const signOut = React.useCallback(() => {
+  const signOut = React.useCallback(async () => {
     window.localStorage.removeItem(ROLE_STORAGE_KEY)
     setRoleState('applicant')
   }, [])
+
+  const refresh = React.useCallback(async () => {}, [])
 
   const value = React.useMemo<SessionContextValue>(
     () => ({
       session: MOCK_SESSIONS[role],
       role,
+      tenantName: MOCK_SESSIONS[role].tenant_name ?? null,
       isLoading: false,
       setRole,
       signIn,
       signOut,
+      refresh,
     }),
-    [role, setRole, signIn, signOut],
+    [role, setRole, signIn, signOut, refresh],
   )
 
   return (
@@ -123,10 +135,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function useSession(): SessionContextValue {
-  const context = React.useContext(SessionContext)
-  if (!context) {
-    throw new Error('useSession must be used within a SessionProvider')
+export function SessionProvider({ children }: { children: React.ReactNode }) {
+  // Render-check and SSR run in Node, where Better Auth's browser client must
+  // not be imported. The mock keeps every route renderable there.
+  if (USE_LIVE_AUTH && typeof window !== 'undefined') {
+    return (
+      <React.Suspense fallback={null}>
+        <LiveSessionProvider>{children}</LiveSessionProvider>
+      </React.Suspense>
+    )
   }
-  return context
+  return <MockSessionProvider>{children}</MockSessionProvider>
 }
+
+export { useSession } from './session-context'

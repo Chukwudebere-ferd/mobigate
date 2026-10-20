@@ -89,33 +89,6 @@ const CULTURE_NOTE = {
   role: 'Senior Backend Engineer, Engineering',
 }
 
-const STEPS = [
-  {
-    title: 'Apply',
-    description:
-      'Submit your details, CV and a passport photograph. You get an application number straight away.',
-    icon: ClipboardCheck,
-  },
-  {
-    title: 'Interview',
-    description:
-      'Shortlisted candidates are invited to an interview session, with the date and venue sent to you.',
-    icon: CalendarClock,
-  },
-  {
-    title: 'Shortlist',
-    description:
-      'Interview feedback and references are reviewed before the shortlist is confirmed.',
-    icon: CircleCheck,
-  },
-  {
-    title: 'Appointment',
-    description:
-      'Successful applicants receive an access code and begin staff onboarding.',
-    icon: Briefcase,
-  },
-]
-
 interface RoleRow {
   job: Job
   department: string

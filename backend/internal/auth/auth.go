@@ -2,10 +2,8 @@
 //
 // Better Auth issues an httpOnly session cookie. The Go service does not
 // re-implement credential checking; it asks the auth service to resolve the
-// session and then reads the MGM role and tenant from the returned user.
-//
-// The resolved context is placed in the request context and used by every
-// query to scope results to a tenant (BR-15).
+// session and then loads the MGM domain profile for that user. The domain
+// row is authoritative for role, tenant and approval status (BR-15).
 package auth
 
 import (
@@ -17,7 +15,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/mobigate/mgm-portal/internal/models"
+	"github.com/mobigate/mgm-portal/internal/store"
 )
 
 // ErrUnauthenticated is returned when no valid session is present.
@@ -25,11 +26,12 @@ var ErrUnauthenticated = errors.New("unauthenticated")
 
 // User is the MGM-specific portion of a session.
 type User struct {
-	ID       string
-	Email    string
-	Role     models.UserRole
-	TenatID  string
-	StaffID  string
+	ID        string
+	Email     string
+	Role      models.UserRole
+	Status    models.UserStatus
+	TenantID  string
+	StaffID   string
 	FirstName string
 	LastName  string
 }
@@ -37,6 +39,11 @@ type User struct {
 // Context is the resolved session for a request.
 type Context struct {
 	User User
+}
+
+// UserStore loads the domain profile behind an authenticated identity.
+type UserStore interface {
+	UserByID(ctx context.Context, id string) (models.User, error)
 }
 
 // Verifier resolves a session cookie into a user.
@@ -47,6 +54,9 @@ type Verifier struct {
 	Client *http.Client
 	// CacheTTL is how long a resolved session is cached by the caller.
 	CacheTTL time.Duration
+	// Users loads the authoritative MGM profile. When nil, the verifier
+	// falls back to the session payload; only appropriate in development.
+	Users UserStore
 }
 
 // sessionResponse mirrors the shape of Better Auth's get-session response.
@@ -108,6 +118,25 @@ func (v *Verifier) Verify(r *http.Request) (Context, error) {
 		return Context{}, ErrUnauthenticated
 	}
 
+	if v.Users != nil {
+		domainUser, err := v.Users.UserByID(r.Context(), payload.User.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			return Context{}, ErrUnauthenticated
+		}
+		if err != nil {
+			return Context{}, fmt.Errorf("load domain user: %w", err)
+		}
+		return Context{User: User{
+			ID:        domainUser.ID.String(),
+			Email:     domainUser.Email,
+			Role:      domainUser.Role,
+			Status:    domainUser.Status,
+			TenantID:  uuidString(domainUser.TenantID),
+			FirstName: domainUser.FirstName,
+			LastName:  domainUser.LastName,
+		}}, nil
+	}
+
 	ctx := Context{
 		User: User{
 			ID:        payload.User.ID,
@@ -118,12 +147,19 @@ func (v *Verifier) Verify(r *http.Request) (Context, error) {
 		},
 	}
 	if payload.User.TenantID != nil {
-		ctx.User.TenatID = *payload.User.TenantID
+		ctx.User.TenantID = *payload.User.TenantID
 	}
 	if payload.User.StaffID != nil {
 		ctx.User.StaffID = *payload.User.StaffID
 	}
 	return ctx, nil
+}
+
+func uuidString(id *uuid.UUID) string {
+	if id == nil {
+		return ""
+	}
+	return id.String()
 }
 
 func (v *Verifier) client() *http.Client {
@@ -159,8 +195,20 @@ func FromContext(ctx context.Context) (Context, bool) {
 	return session, ok
 }
 
-// Middleware rejects unauthenticated requests to the given path prefixes.
+// Middleware rejects unauthenticated requests, non-active accounts, and
+// roles outside the allowed set.
 func (v *Verifier) Middleware(allowed ...models.UserRole) func(http.Handler) http.Handler {
+	return v.middleware(false, allowed...)
+}
+
+// MiddlewareAllowPending is used by the self-service endpoints (such as
+// /me) so that an account awaiting approval can see its own status. It
+// still rejects suspended and disabled accounts.
+func (v *Verifier) MiddlewareAllowPending(allowed ...models.UserRole) func(http.Handler) http.Handler {
+	return v.middleware(true, allowed...)
+}
+
+func (v *Verifier) middleware(allowPending bool, allowed ...models.UserRole) func(http.Handler) http.Handler {
 	allowedSet := make(map[models.UserRole]bool, len(allowed))
 	for _, role := range allowed {
 		allowedSet[role] = true
@@ -170,11 +218,25 @@ func (v *Verifier) Middleware(allowed ...models.UserRole) func(http.Handler) htt
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			session, err := v.Verify(r)
 			if err != nil {
-				writeUnauthorized(w)
+				writeAuthError(w, http.StatusUnauthorized, "authentication required", "unauthenticated")
 				return
 			}
+
+			switch session.User.Status {
+			case models.UserStatusActive:
+				// allowed
+			case models.UserStatusPending:
+				if !allowPending {
+					writeAuthError(w, http.StatusForbidden, "account pending approval", "account_pending")
+					return
+				}
+			default:
+				writeAuthError(w, http.StatusForbidden, "account is not active", "account_inactive")
+				return
+			}
+
 			if len(allowedSet) > 0 && !allowedSet[session.User.Role] {
-				writeForbidden(w)
+				writeAuthError(w, http.StatusForbidden, "insufficient permissions", "forbidden")
 				return
 			}
 			next.ServeHTTP(w, r.WithContext(WithContext(r.Context(), session)))
@@ -182,14 +244,8 @@ func (v *Verifier) Middleware(allowed ...models.UserRole) func(http.Handler) htt
 	}
 }
 
-func writeUnauthorized(w http.ResponseWriter) {
+func writeAuthError(w http.ResponseWriter, status int, message, code string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(`{"error":"authentication required"}`))
-}
-
-func writeForbidden(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
-	_, _ = w.Write([]byte(`{"error":"insufficient permissions"}`))
+	w.WriteHeader(status)
+	_, _ = fmt.Fprintf(w, `{"error":%q,"code":%q}`, message, code)
 }

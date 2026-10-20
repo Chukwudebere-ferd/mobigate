@@ -1,5 +1,6 @@
 import { createBrowserRouter } from 'react-router-dom'
 
+import { RequireRole } from '@/components/auth/require-role'
 import { AdminShell } from '@/components/layout/admin-shell'
 import { PublicShell } from '@/components/layout/public-shell'
 
@@ -14,6 +15,7 @@ import { AdminSettingsPage } from '@/pages/admin/settings'
 import { AdminShortlistsPage } from '@/pages/admin/shortlists'
 import { AdminStaffPage } from '@/pages/admin/staff'
 
+import { LoginPage } from '@/pages/auth/login'
 import { ApplicantApplicationsPage } from '@/pages/applicant/applications'
 import { ApplicantInterviewsPage } from '@/pages/applicant/interviews'
 import { ApplicantPortalLayout } from '@/pages/applicant/layout'
@@ -43,6 +45,9 @@ export const routes = [
   // A developer-facing page listing every screen. It sits outside the
   // product shells so it renders in isolation.
   { path: '/preview', element: <PreviewPage /> },
+
+  // -- Authentication ------------------------------------------------------
+  { path: '/login', element: <LoginPage /> },
 
   // -- Public site ---------------------------------------------------------
   {
@@ -77,7 +82,11 @@ export const routes = [
 
   // -- Admin panel ---------------------------------------------------------
   {
-    element: <AdminShell />,
+    element: (
+      <RequireRole roles={['admin', 'super_admin']}>
+        <AdminShell />
+      </RequireRole>
+    ),
     children: [
       { path: '/admin', element: <AdminDashboardPage /> },
       { path: '/admin/applications', element: <AdminApplicationsPage /> },

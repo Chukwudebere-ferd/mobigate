@@ -37,8 +37,8 @@ func GenerateAccessCode(length int) (string, error) {
 	}
 
 	var b strings.Builder
-	for _, b := range buf {
-		b.WriteByte(crockford[int(b)%len(crockford)])
+	for _, v := range buf {
+		b.WriteByte(crockford[int(v)%len(crockford)])
 	}
 	return b.String(), nil
 }

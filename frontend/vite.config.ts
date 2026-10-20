@@ -14,16 +14,15 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // Better Auth server. Declared before '/api': Vite matches proxy keys
+      // in order, and '/api' would otherwise swallow '/api/auth/*'.
+      '/api/auth': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
       // Go API (recruitment + personnel domain)
       '/api': {
         target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      // Better Auth server. The better-auth React client is transport-agnostic:
-      // it only issues fetches against /api/auth/*, so this target can later
-      // be repointed at the Go binary without touching frontend code.
-      '/api/auth': {
-        target: 'http://localhost:3000',
         changeOrigin: true,
       },
     },

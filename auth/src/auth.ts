@@ -7,6 +7,7 @@
  *
  * Run with:  pnpm --filter @mgm/auth dev
  */
+import './env.js'
 import { betterAuth } from 'better-auth'
 import { admin as adminPlugin } from 'better-auth/plugins'
 import { Pool } from 'pg'
@@ -46,6 +47,27 @@ export const auth = betterAuth({
   session: {
     expiresIn: 60 * 60 * 24 * 7,
     updateAge: 60 * 60 * 24,
+  },
+
+  // The frontend dev server (5173) proxies /api/auth to this service, so the
+  // browser origin differs from baseURL. Trust it explicitly; production
+  // origins come from TRUSTED_ORIGINS.
+  trustedOrigins: (
+    process.env.TRUSTED_ORIGINS ??
+    'http://localhost:5173,http://127.0.0.1:5173'
+  )
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+
+  rateLimit: {
+    enabled: true,
+    window: 60,
+    max: 60,
+    customRules: {
+      '/sign-in/email': { window: 60, max: 5 },
+      '/sign-up/email': { window: 60, max: 3 },
+    },
   },
 
   plugins: [adminPlugin()],

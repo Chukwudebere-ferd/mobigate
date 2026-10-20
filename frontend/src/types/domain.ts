@@ -372,4 +372,12 @@ export interface Session {
     /** Present for staff sessions. */
     staff_id?: string
   }
+  /** State scope label shown in the admin shell. */
+  tenant_name?: string | null
+}
+
+/** Response from GET /me (Go API). */
+export interface MeResponse {
+  user: Session['user']
+  tenant: { id: string; name: string } | null
 }

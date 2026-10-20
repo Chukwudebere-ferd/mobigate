@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/mobigate/mgm-portal/internal/auth"
 	"github.com/mobigate/mgm-portal/internal/codes"
@@ -23,6 +23,9 @@ type Handler struct {
 	// Verifier resolves Better Auth session cookies. It may be nil in
 	// development, in which case protected routes are not enforced.
 	Verifier *auth.Verifier
+	// AllowedOrigins lists browser origins permitted to make state-changing
+	// requests. Same-origin requests are always allowed.
+	AllowedOrigins []string
 }
 
 // Register mounts every MVP route on the given router.
@@ -40,24 +43,25 @@ func (h *Handler) Register(r chi.Router) {
 		r.Post("/applications", h.submitApplication)
 	})
 
-	r.Route("/me", h.require(models.RoleApplicant, models.RoleStaff, models.RoleAdmin, models.RoleSuperAdmin),
-		func(r chi.Router) {
-			r.Get("/applications", h.myApplications)
-			r.Get("/applications/{id}", h.myApplication)
-			r.Get("/applications/{id}/shortlist", h.myShortlistMessage)
-			r.Get("/interviews", h.myInterviews)
-		})
+	r.Route("/me", func(r chi.Router) {
+		h.requireAllowPending(models.RoleApplicant, models.RoleStaff, models.RoleAdmin, models.RoleSuperAdmin)(r)
+		r.Get("/", h.currentUser)
+		r.Get("/applications", h.myApplications)
+		r.Get("/applications/{id}", h.myApplication)
+		r.Get("/applications/{id}/shortlist", h.myShortlistMessage)
+		r.Get("/interviews", h.myInterviews)
+	})
 
-	r.Route("/staff", h.require(models.RoleApplicant, models.RoleStaff, models.RoleAdmin, models.RoleSuperAdmin),
-		func(r chi.Router) {
-			r.Post("/redeem", h.redeemAccessCode)
-			r.Post("/onboarding", h.completeOnboarding)
-		})
+	r.Route("/staff", func(r chi.Router) {
+		h.require(models.RoleApplicant, models.RoleStaff, models.RoleAdmin, models.RoleSuperAdmin)(r)
+		r.Post("/redeem", h.redeemAccessCode)
+		r.Post("/onboarding", h.completeOnboarding)
+	})
 
-	r.Route("/admin", h.require(models.RoleAdmin, models.RoleSuperAdmin),
-		func(r chi.Router) {
-			h.registerAdminRoutes(r)
-		})
+	r.Route("/admin", func(r chi.Router) {
+		h.require(models.RoleAdmin, models.RoleSuperAdmin)(r)
+		h.registerAdminRoutes(r)
+	})
 }
 
 // require applies session verification to a route group when a verifier is
@@ -70,6 +74,53 @@ func (h *Handler) require(roles ...models.UserRole) func(chi.Router) {
 		}
 		r.Use(h.Verifier.Middleware(roles...))
 	}
+}
+
+// requireAllowPending is the self-service variant of require. A pending
+// account may read its own status but cannot perform role-restricted work.
+func (h *Handler) requireAllowPending(roles ...models.UserRole) func(chi.Router) {
+	return func(r chi.Router) {
+		if h.Verifier == nil {
+			return
+		}
+		r.Use(h.Verifier.MiddlewareAllowPending(roles...))
+	}
+}
+
+// OriginGuard rejects cross-origin state-changing requests. Cookie sessions
+// rely on this in addition to SameSite to prevent CSRF. It must be installed
+// with the router's other middleware, before any route is registered.
+func (h *Handler) OriginGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		parsed, err := url.Parse(origin)
+		if err != nil {
+			writeError(w, http.StatusForbidden, "invalid origin")
+			return
+		}
+		if strings.EqualFold(parsed.Host, r.Host) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		for _, allowed := range h.AllowedOrigins {
+			if strings.EqualFold(strings.TrimSpace(allowed), origin) {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		writeError(w, http.StatusForbidden, "origin not allowed")
+	})
 }
 
 func (h *Handler) registerAdminRoutes(r chi.Router) {
@@ -134,6 +185,46 @@ func (h *Handler) submitApplication(w http.ResponseWriter, r *http.Request) {
 	// 201 -> Application (includes the generated application_number)
 	// 409 -> a duplicate application for the same job and email
 	writeJSON(w, http.StatusCreated, models.Application{})
+}
+
+// currentUser returns the signed-in user's domain profile and state scope.
+// Better Auth owns the session; this response is the frontend's view of the
+// MGM user, including pending/suspended status.
+func (h *Handler) currentUser(w http.ResponseWriter, r *http.Request) {
+	session, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	user := map[string]any{
+		"id":         session.User.ID,
+		"email":      session.User.Email,
+		"first_name": session.User.FirstName,
+		"last_name":  session.User.LastName,
+		"role":       session.User.Role,
+		"status":     session.User.Status,
+		"tenant_id":  nil,
+		"staff_id":   nil,
+	}
+	if session.User.TenantID != "" {
+		user["tenant_id"] = session.User.TenantID
+	}
+	if session.User.StaffID != "" {
+		user["staff_id"] = session.User.StaffID
+	}
+
+	payload := map[string]any{"user": user}
+	if session.User.TenantID != "" && h.Store != nil {
+		tenant, err := h.Store.TenantByID(r.Context(), session.User.TenantID)
+		if err == nil {
+			payload["tenant"] = map[string]any{
+				"id":   tenant.ID.String(),
+				"name": tenant.Name,
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 func (h *Handler) myApplications(w http.ResponseWriter, r *http.Request) {

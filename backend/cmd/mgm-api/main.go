@@ -58,10 +58,12 @@ func run() error {
 
 	st := store.New(pool)
 	handler := &httpapi.Handler{
-		Store: st,
+		Store:          st,
+		AllowedOrigins: cfg.AllowedOrigins,
 		Verifier: &auth.Verifier{
 			BaseURL:  cfg.AuthBaseURL,
 			CacheTTL: 60 * time.Second,
+			Users:    st,
 		},
 	}
 
@@ -71,6 +73,7 @@ func run() error {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(middleware.Compress(5))
+	r.Use(handler.OriginGuard)
 
 	r.Get("/healthz", func(w http.ResponseWriter, req *http.Request) {
 		if err := st.Ping(req.Context()); err != nil {
@@ -81,7 +84,11 @@ func run() error {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
-	handler.Register(r)
+	// Domain routes live under /api so the frontend can proxy /api to Go and
+	// /api/auth to Better Auth on the same origin.
+	r.Route("/api", func(api chi.Router) {
+		handler.Register(api)
+	})
 
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

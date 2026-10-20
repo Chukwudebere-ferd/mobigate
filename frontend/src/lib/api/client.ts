@@ -35,7 +35,9 @@ export class ApiError extends Error {
   }
 }
 
-const BASE_URL = import.meta.env.VITE_API_URL ?? ''
+// The Go API is mounted under /api. VITE_API_URL may override this with a
+// full origin, e.g. https://api.example.com/api.
+const BASE_URL = import.meta.env.VITE_API_URL ?? '/api'
 
 interface RequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown
@@ -74,9 +76,15 @@ export async function request<T>(
   if (response.status === 204) return undefined as T
 
   const contentType = response.headers.get('content-type') ?? ''
-  const payload = contentType.includes('application/json')
-    ? await response.json()
-    : await response.text()
+  if (!contentType.includes('application/json')) {
+    // A non-JSON body means the request hit the SPA fallback or a proxy
+    // error, not the Go API. Fail loudly instead of casting text to T.
+    throw new ApiError(
+      response.status,
+      `Expected JSON from ${path}, received ${contentType || 'no content type'}`,
+    )
+  }
+  const payload: unknown = await response.json()
 
   if (!response.ok) {
     const message =

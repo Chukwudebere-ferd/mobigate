@@ -1,9 +1,9 @@
 import {
   Briefcase,
   CalendarClock,
-  ChevronDown,
   KeyRound,
   LayoutDashboard,
+  LogOut,
   MapPin,
   Menu,
   MessageSquareText,
@@ -16,6 +16,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { Avatar } from '@/components/ui/avatar'
 import { cn } from '@/lib/cn'
 import { fullName } from '@/lib/format'
+import { useSession } from '@/providers/session-provider'
 
 interface NavItem {
   to: string
@@ -101,6 +102,12 @@ function NavSection({
 export function AdminShell() {
   const [mobileOpen, setMobileOpen] = React.useState(false)
   const location = useLocation()
+  const { session, tenantName, signOut } = useSession()
+  const user = session?.user
+  const displayName = user
+    ? fullName(user.first_name, user.last_name)
+    : 'Administrator'
+  const roleLabel = user?.role === 'super_admin' ? 'Super Admin' : 'State Admin'
 
   // Close the mobile drawer whenever the route changes. Deriving it during
   // render avoids a state update in an effect, which would cause a second
@@ -155,10 +162,11 @@ export function AdminShell() {
           <div className="flex items-center gap-2 text-sm">
             <span className="font-medium text-ink-400">Admin</span>
             <span className="text-ink-300">/</span>
-            <span className="font-medium text-ink-700">Lagos</span>
-            <span className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2 py-0.5 text-2xs font-medium text-ink-600">
-              State scope
-              <ChevronDown className="size-3" />
+            <span className="font-medium text-ink-700">
+              {tenantName ?? 'All states'}
+            </span>
+            <span className="inline-flex items-center rounded-full bg-ink-100 px-2 py-0.5 text-2xs font-medium text-ink-600">
+              {user?.role === 'super_admin' ? 'Group scope' : 'State scope'}
             </span>
           </div>
 
@@ -170,13 +178,27 @@ export function AdminShell() {
               View public site
             </Link>
             <div className="flex items-center gap-2.5">
-              <Avatar first="Aisha" last="Adeyemi" size="sm" />
+              <Avatar
+                first={user?.first_name ?? ''}
+                last={user?.last_name ?? ''}
+                size="sm"
+              />
               <div className="hidden leading-tight sm:block">
-                <p className="text-xs font-semibold text-ink-900">Aisha Adeyemi</p>
-                <p className="text-2xs text-ink-500">State Admin</p>
+                <p className="text-xs font-semibold text-ink-900">
+                  {displayName}
+                </p>
+                <p className="text-2xs text-ink-500">{roleLabel}</p>
               </div>
-              <ChevronDown className="size-4 text-ink-400" />
             </div>
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-ink-500 transition-colors hover:bg-ink-100 hover:text-ink-900"
+            >
+              <LogOut className="size-4" aria-hidden />
+              <span className="hidden sm:inline">Sign out</span>
+              <span className="sr-only sm:hidden">Sign out</span>
+            </button>
           </div>
         </header>
 
