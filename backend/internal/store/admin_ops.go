@@ -58,14 +58,16 @@ func (s *Store) ListAccessCodes(ctx context.Context, q AccessCodeQuery) (Paginat
 		where = append(where, "c.type = "+add(q.Type))
 	}
 	if q.JobID != nil {
-		where = append(where, "a.job_id = "+add(*q.JobID))
+		where = append(where, "(a.job_id = "+add(*q.JobID)+" OR sp.application_id = "+add(*q.JobID)+")")
 	}
 	if q.Search != "" {
 		p := add("%" + q.Search + "%")
 		where = append(where, fmt.Sprintf(
 			`(c.code_hint ILIKE %s OR a.first_name ILIKE %s
-			  OR a.last_name ILIKE %s OR a.application_number ILIKE %s)`,
-			p, p, p, p,
+			  OR a.last_name ILIKE %s OR a.application_number ILIKE %s
+			  OR sp.first_name ILIKE %s OR sp.last_name ILIKE %s
+			  OR sp.staff_id ILIKE %s OR sp.email ILIKE %s)`,
+			p, p, p, p, p, p, p, p,
 		))
 	}
 	whereSQL := strings.Join(where, " AND ")
@@ -73,7 +75,9 @@ func (s *Store) ListAccessCodes(ctx context.Context, q AccessCodeQuery) (Paginat
 	const from = `
 		FROM access_codes c
 		LEFT JOIN applications a ON a.id = c.application_id
-		LEFT JOIN jobs j ON j.id = a.job_id`
+		LEFT JOIN jobs j ON j.id = a.job_id
+		LEFT JOIN staff_profiles sp ON sp.id = c.staff_profile_id
+		LEFT JOIN departments d ON d.id = sp.department_id`
 	var total int
 	if err := s.pool.QueryRow(ctx, `SELECT count(*)::int `+from+` WHERE `+whereSQL, args...).Scan(&total); err != nil {
 		return PaginatedAccessCodes{}, err
@@ -84,12 +88,17 @@ func (s *Store) ListAccessCodes(ctx context.Context, q AccessCodeQuery) (Paginat
 	dataSQL := `
 		SELECT
 			c.id, c.tenant_id, c.code_hint, c.type, c.application_id,
-			c.issued_to, c.issued_by, c.status, c.expires_at, c.used_at,
-			c.failed_attempts, c.created_at,
-			CASE WHEN a.id IS NULL THEN NULL
-			     ELSE trim(both ' ' FROM a.first_name || ' ' || a.last_name)
-			END AS applicant_name,
-			j.title AS job_title
+			c.staff_profile_id, c.issued_to, c.issued_by, c.status,
+			c.expires_at, c.used_at, c.failed_attempts, c.created_at,
+			COALESCE(
+				CASE WHEN a.id IS NULL THEN NULL
+				     ELSE trim(both ' ' FROM a.first_name || ' ' || a.last_name)
+				END,
+				CASE WHEN sp.id IS NULL THEN NULL
+				     ELSE trim(both ' ' FROM sp.first_name || ' ' || sp.last_name)
+				END
+			) AS applicant_name,
+			COALESCE(j.title, sp.position, d.name) AS job_title
 		` + from + `
 		WHERE ` + whereSQL + `
 		ORDER BY c.created_at DESC
@@ -104,17 +113,18 @@ func (s *Store) ListAccessCodes(ctx context.Context, q AccessCodeQuery) (Paginat
 	items := make([]models.AccessCode, 0, q.PerPage)
 	for rows.Next() {
 		var (
-			code                          models.AccessCode
-			rawID, rawTenantID            string
-			rawApplicationID, rawIssuedTo *string
-			rawIssuedBy                   *string
-			rawStatus, rawType            string
+			code                                models.AccessCode
+			rawID, rawTenantID                  string
+			rawApplicationID, rawStaffProfileID *string
+			rawIssuedTo, rawIssuedBy            *string
+			rawStatus, rawType                  string
 		)
 		if err := rows.Scan(
 			&rawID, &rawTenantID, &code.CodeHint, &rawType,
-			&rawApplicationID, &rawIssuedTo, &rawIssuedBy, &rawStatus,
-			&code.ExpiresAt, &code.UsedAt, &code.FailedAttempts,
-			&code.CreatedAt, &code.ApplicantName, &code.JobTitle,
+			&rawApplicationID, &rawStaffProfileID, &rawIssuedTo,
+			&rawIssuedBy, &rawStatus, &code.ExpiresAt, &code.UsedAt,
+			&code.FailedAttempts, &code.CreatedAt, &code.ApplicantName,
+			&code.JobTitle,
 		); err != nil {
 			return PaginatedAccessCodes{}, err
 		}
@@ -127,6 +137,9 @@ func (s *Store) ListAccessCodes(ctx context.Context, q AccessCodeQuery) (Paginat
 		code.Type = models.AccessCodeType(rawType)
 		code.Status = models.AccessCodeStatus(rawStatus)
 		if code.ApplicationID, err = optionalUUID(rawApplicationID); err != nil {
+			return PaginatedAccessCodes{}, err
+		}
+		if code.StaffProfileID, err = optionalUUID(rawStaffProfileID); err != nil {
 			return PaginatedAccessCodes{}, err
 		}
 		if code.IssuedTo, err = optionalUUID(rawIssuedTo); err != nil {
@@ -152,11 +165,14 @@ func (s *Store) ListAccessCodes(ctx context.Context, q AccessCodeQuery) (Paginat
 }
 
 // IssueAccessCode creates a single-use code and returns the plaintext once.
+// A code targets either an application (an applicant who has not onboarded
+// yet) or an existing staff profile (a record created manually by an admin).
 func (s *Store) IssueAccessCode(
 	ctx context.Context,
 	tenantID *uuid.UUID,
 	actorID *uuid.UUID,
-	applicationID uuid.UUID,
+	applicationID *uuid.UUID,
+	staffProfileID *uuid.UUID,
 	codeType models.AccessCodeType,
 	expiresAt time.Time,
 ) (string, models.AccessCode, error) {
@@ -167,30 +183,87 @@ func (s *Store) IssueAccessCode(
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var (
-		rawTenantID, rawApplicantID string
-		firstName, lastName         string
-		jobTitle                    string
+		codeTenant          uuid.UUID
+		issuedTo            *uuid.UUID
+		linkedApplicationID *uuid.UUID
+		recipientContact    string
+		firstName, lastName string
+		jobTitle            string
 	)
-	err = tx.QueryRow(ctx, `
-		SELECT a.tenant_id, a.applicant_id, a.first_name, a.last_name, j.title
-		FROM applications a
-		JOIN jobs j ON j.id = a.job_id
-		WHERE a.id = $1 AND ($2::uuid IS NULL OR a.tenant_id = $2)`,
-		applicationID, tenantID,
-	).Scan(&rawTenantID, &rawApplicantID, &firstName, &lastName, &jobTitle)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", models.AccessCode{}, ErrNotFound
-	}
-	if err != nil {
-		return "", models.AccessCode{}, err
-	}
-	applicationTenant, err := uuid.Parse(rawTenantID)
-	if err != nil {
-		return "", models.AccessCode{}, err
-	}
-	applicantID, err := uuid.Parse(rawApplicantID)
-	if err != nil {
-		return "", models.AccessCode{}, err
+
+	switch {
+	case staffProfileID != nil:
+		if codeType != models.AccessCodeStaff {
+			return "", models.AccessCode{}, fmt.Errorf("%w: a staff record can only receive a staff access code", ErrValidation)
+		}
+		var (
+			rawTenantID, rawProfileID      string
+			rawUserID, rawApplicationID    *string
+			rawPosition, rawDepartmentName *string
+		)
+		err = tx.QueryRow(ctx, `
+			SELECT sp.tenant_id, sp.id, sp.user_id, sp.application_id,
+			       sp.first_name, sp.last_name, sp.email, sp.position,
+			       d.name
+			FROM staff_profiles sp
+			LEFT JOIN departments d ON d.id = sp.department_id
+			WHERE sp.id = $1 AND ($2::uuid IS NULL OR sp.tenant_id = $2)`,
+			*staffProfileID, tenantID,
+		).Scan(&rawTenantID, &rawProfileID, &rawUserID, &rawApplicationID,
+			&firstName, &lastName, &recipientContact, &rawPosition,
+			&rawDepartmentName)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", models.AccessCode{}, ErrNotFound
+		}
+		if err != nil {
+			return "", models.AccessCode{}, err
+		}
+		if codeTenant, err = uuid.Parse(rawTenantID); err != nil {
+			return "", models.AccessCode{}, err
+		}
+		if issuedTo, err = optionalUUID(rawUserID); err != nil {
+			return "", models.AccessCode{}, err
+		}
+		if linkedApplicationID, err = optionalUUID(rawApplicationID); err != nil {
+			return "", models.AccessCode{}, err
+		}
+		jobTitle = strings.TrimSpace(derefString(rawPosition))
+		if jobTitle == "" {
+			jobTitle = strings.TrimSpace(derefString(rawDepartmentName))
+		}
+		if jobTitle == "" {
+			jobTitle = "Staff"
+		}
+
+	case applicationID != nil:
+		var rawTenantID, rawApplicantID string
+		err = tx.QueryRow(ctx, `
+			SELECT a.tenant_id, a.applicant_id, a.first_name, a.last_name,
+			       a.email, j.title
+			FROM applications a
+			JOIN jobs j ON j.id = a.job_id
+			WHERE a.id = $1 AND ($2::uuid IS NULL OR a.tenant_id = $2)`,
+			*applicationID, tenantID,
+		).Scan(&rawTenantID, &rawApplicantID, &firstName, &lastName,
+			&recipientContact, &jobTitle)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", models.AccessCode{}, ErrNotFound
+		}
+		if err != nil {
+			return "", models.AccessCode{}, err
+		}
+		if codeTenant, err = uuid.Parse(rawTenantID); err != nil {
+			return "", models.AccessCode{}, err
+		}
+		parsedApplicantID, err := uuid.Parse(rawApplicantID)
+		if err != nil {
+			return "", models.AccessCode{}, err
+		}
+		issuedTo = &parsedApplicantID
+		linkedApplicationID = applicationID
+
+	default:
+		return "", models.AccessCode{}, fmt.Errorf("%w: choose an application or a staff record", ErrValidation)
 	}
 
 	var (
@@ -221,11 +294,11 @@ func (s *Store) IssueAccessCode(
 	err = tx.QueryRow(ctx, `
 		INSERT INTO access_codes (
 			tenant_id, code_hash, code_hint, type, application_id,
-			issued_to, issued_by, status, expires_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,'active',$8)
+			staff_profile_id, issued_to, issued_by, status, expires_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)
 		RETURNING id, created_at`,
-		applicationTenant, hash, hint, codeType, applicationID,
-		applicantID, actorID, expiresAt,
+		codeTenant, hash, hint, codeType, linkedApplicationID,
+		staffProfileID, issuedTo, actorID, expiresAt,
 	).Scan(&rawID, &createdAt)
 	if err != nil {
 		return "", models.AccessCode{}, mapWriteError(err)
@@ -235,22 +308,24 @@ func (s *Store) IssueAccessCode(
 		return "", models.AccessCode{}, err
 	}
 
-	if err := insertAudit(ctx, tx, applicationTenant, actorID,
+	if err := insertAudit(ctx, tx, codeTenant, actorID,
 		"access_code.issued", "access_code", codeID,
 		nil,
-		map[string]any{"type": codeType, "hint": hint, "expires_at": expiresAt},
+		map[string]any{
+			"type": codeType, "hint": hint, "expires_at": expiresAt,
+			"staff_profile_id": staffProfileID,
+		},
 	); err != nil {
 		return "", models.AccessCode{}, err
 	}
 	// Notify-only (README M12 / BR-17): the template and payload carry no
 	// code. The admin delivers the plaintext out-of-band.
 	applicantName := strings.TrimSpace(firstName + " " + lastName)
-	title := jobTitle
-	if err := EnqueueNotification(ctx, tx, applicationTenant, &applicantID, "",
+	if err := EnqueueNotification(ctx, tx, codeTenant, issuedTo, recipientContact,
 		"access_code_issued", map[string]any{
 			"applicant_name": applicantName,
 			"first_name":     firstName,
-			"job_title":      title,
+			"job_title":      jobTitle,
 		},
 	); err != nil {
 		return "", models.AccessCode{}, err
@@ -260,11 +335,12 @@ func (s *Store) IssueAccessCode(
 	}
 
 	return plaintext, models.AccessCode{
-		ID: codeID, TenantID: applicationTenant, CodeHint: hint,
-		Type: codeType, ApplicationID: &applicationID, IssuedTo: &applicantID,
+		ID: codeID, TenantID: codeTenant, CodeHint: hint,
+		Type: codeType, ApplicationID: linkedApplicationID,
+		StaffProfileID: staffProfileID, IssuedTo: issuedTo,
 		IssuedBy: actorID, Status: models.AccessCodeActive,
 		ExpiresAt: expiresAt, CreatedAt: createdAt,
-		ApplicantName: &applicantName, JobTitle: &title,
+		ApplicantName: &applicantName, JobTitle: &jobTitle,
 	}, nil
 }
 
@@ -499,8 +575,20 @@ func (s *Store) GetStaff(
 	tenantID *uuid.UUID,
 	id uuid.UUID,
 ) (models.StaffProfile, error) {
-	q := staffSelect + ` WHERE sp.id = $1 AND ($2::uuid IS NULL OR sp.tenant_id = $2)`
-	staff, err := scanStaff(s.pool.QueryRow(ctx, q, id, tenantID))
+	return staffByIDUsing(ctx, s.pool, tenantID, id)
+}
+
+// staffByIDUsing loads one tenant-scoped staff record through a transaction or
+// the pool, so the redemption path can prefill from it without a second
+// connection.
+func staffByIDUsing(
+	ctx context.Context,
+	q queryer,
+	tenantID *uuid.UUID,
+	id uuid.UUID,
+) (models.StaffProfile, error) {
+	sql := staffSelect + ` WHERE sp.id = $1 AND ($2::uuid IS NULL OR sp.tenant_id = $2)`
+	staff, err := scanStaff(q.QueryRow(ctx, sql, id, tenantID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.StaffProfile{}, ErrNotFound
 	}

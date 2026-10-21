@@ -260,6 +260,7 @@ type AccessCode struct {
 	CodeHint       string           `json:"code_hint"`
 	Type           AccessCodeType   `json:"type"`
 	ApplicationID  *uuid.UUID       `json:"application_id"`
+	StaffProfileID *uuid.UUID       `json:"staff_profile_id"`
 	IssuedTo       *uuid.UUID       `json:"issued_to"`
 	IssuedBy       *uuid.UUID       `json:"issued_by"`
 	Status         AccessCodeStatus `json:"status"`

@@ -52,6 +52,7 @@ func (h *Handler) issueAccessCodeAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	var payload struct {
 		ApplicationID string `json:"application_id"`
+		StaffID       string `json:"staff_id"`
 		Type          string `json:"type"`
 		ExpiresAt     string `json:"expires_at"`
 	}
@@ -59,27 +60,55 @@ func (h *Handler) issueAccessCodeAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	applicationID, err := uuid.Parse(payload.ApplicationID)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid application_id")
-		return
-	}
 	codeType := models.AccessCodeType(payload.Type)
 	if codeType != models.AccessCodeApplicant && codeType != models.AccessCodeStaff {
 		writeError(w, http.StatusBadRequest, "invalid type")
 		return
 	}
+	var (
+		applicationID  *uuid.UUID
+		staffProfileID *uuid.UUID
+	)
+	if raw := strings.TrimSpace(payload.ApplicationID); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid application_id")
+			return
+		}
+		applicationID = &parsed
+	}
+	if raw := strings.TrimSpace(payload.StaffID); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid staff_id")
+			return
+		}
+		staffProfileID = &parsed
+	}
+	switch codeType {
+	case models.AccessCodeApplicant:
+		if applicationID == nil || staffProfileID != nil {
+			writeError(w, http.StatusBadRequest, "select a shortlisted applicant for an applicant code")
+			return
+		}
+	case models.AccessCodeStaff:
+		if applicationID == nil && staffProfileID == nil {
+			writeError(w, http.StatusBadRequest, "select an applicant or staff member for a staff code")
+			return
+		}
+	}
 	var expiresAt time.Time
 	if raw := strings.TrimSpace(payload.ExpiresAt); raw != "" {
-		expiresAt, err = time.Parse(time.RFC3339, raw)
-		if err != nil {
+		parsed, parseErr := time.Parse(time.RFC3339, raw)
+		if parseErr != nil {
 			writeError(w, http.StatusBadRequest, "invalid expires_at")
 			return
 		}
-		if !expiresAt.After(time.Now()) {
+		if !parsed.After(time.Now()) {
 			writeError(w, http.StatusBadRequest, "expires_at must be in the future")
 			return
 		}
+		expiresAt = parsed
 	}
 	tenantID := scope
 	if tenantID == nil {
@@ -91,7 +120,8 @@ func (h *Handler) issueAccessCodeAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	code, record, err := h.Store.IssueAccessCode(
-		r.Context(), tenantID, adminActorID(r), applicationID, codeType, expiresAt,
+		r.Context(), tenantID, adminActorID(r), applicationID, staffProfileID,
+		codeType, expiresAt,
 	)
 	if err != nil {
 		writeStoreError(w, err, "could not issue access code")

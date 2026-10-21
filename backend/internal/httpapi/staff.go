@@ -85,22 +85,53 @@ func (h *Handler) redeemAccessCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload := map[string]any{
-		"ticket":      ticket,
+		"ticket":            ticket,
 		"ticket_expires_at": time.Now().Add(ticketTTL).UTC().Format(time.RFC3339),
-		"departments": redemption.Departments,
+		"departments":       redemption.Departments,
 	}
 	if redemption.Application != nil {
 		payload["application"] = redemption.Application
-		// Seed the form so the candidate does not retype their details.
+	}
+	switch {
+	case redemption.Staff != nil:
+		// An existing staff record already holds the details captured by the
+		// admin. Prefill them and let onboarding update the same profile.
+		staff := redemption.Staff
 		payload["prefill"] = map[string]any{
-			"first_name":  redemption.Application.FirstName,
-			"last_name":   redemption.Application.LastName,
-			"email":       redemption.Application.Email,
-			"phone":       redemption.Application.Phone,
-			"gender":      redemption.Application.Gender,
+			"first_name":               staff.FirstName,
+			"last_name":                staff.LastName,
+			"email":                    staff.Email,
+			"phone":                    staff.Phone,
+			"gender":                   staff.Gender,
+			"date_of_birth":            staff.DateOfBirth,
+			"location_id":              staff.LocationID,
+			"address_line":             staff.AddressLine,
+			"employment_category":      staff.EmploymentCategory,
+			"department_id":            staff.DepartmentID,
+			"position":                 staff.Position,
+			"appointment_date":         staff.AppointmentDate,
+			"bank_name":                staff.BankName,
+			"bank_account_name":        staff.BankAccountName,
+			"bank_account_number":      staff.BankAccountNumber,
+			"guarantor_name":           staff.GuarantorName,
+			"guarantor_phone":          staff.GuarantorPhone,
+			"guarantor_address":        staff.GuarantorAddress,
+			"guarantor_relationship":   staff.GuarantorRelationship,
+			"next_of_kin_name":         staff.NextOfKinName,
+			"next_of_kin_phone":        staff.NextOfKinPhone,
+			"next_of_kin_relationship": staff.NextOfKinRelationship,
+		}
+	case redemption.Application != nil:
+		// Seed the form so the applicant does not retype their details.
+		payload["prefill"] = map[string]any{
+			"first_name":    redemption.Application.FirstName,
+			"last_name":     redemption.Application.LastName,
+			"email":         redemption.Application.Email,
+			"phone":         redemption.Application.Phone,
+			"gender":        redemption.Application.Gender,
 			"date_of_birth": redemption.Application.DateOfBirth,
-			"location_id": redemption.Application.LocationID,
-			"address_line": redemption.Application.AddressLine,
+			"location_id":   redemption.Application.LocationID,
+			"address_line":  redemption.Application.AddressLine,
 		}
 	}
 
@@ -211,8 +242,8 @@ func (h *Handler) completeOnboarding(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	in := store.OnboardingInput{
-		CodeID:   redemption.CodeID,
-		UserID:   userID,
+		CodeID:      redemption.CodeID,
+		UserID:      userID,
 		StaffUserID: userID,
 	}
 	if redemption.Application != nil {
@@ -306,10 +337,10 @@ func (h *Handler) staffMe(w http.ResponseWriter, r *http.Request) {
 	items := make([]map[string]any, 0, len(documents))
 	for _, doc := range documents {
 		items = append(items, map[string]any{
-			"id":        doc.ID.String(),
-			"category":  doc.Category,
-			"file_name": doc.FileName,
-			"mime_type": doc.MimeType,
+			"id":         doc.ID.String(),
+			"category":   doc.Category,
+			"file_name":  doc.FileName,
+			"mime_type":  doc.MimeType,
 			"size_bytes": doc.SizeBytes,
 			"created_at": doc.CreatedAt,
 		})

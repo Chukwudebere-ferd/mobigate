@@ -394,7 +394,8 @@ export const adminApi = {
   },
 
   async issueAccessCode(payload: {
-    application_id: string
+    application_id?: string
+    staff_id?: string
     type: 'applicant' | 'staff'
     expires_at?: string
   }): Promise<{ code: string; record: AccessCode }> {

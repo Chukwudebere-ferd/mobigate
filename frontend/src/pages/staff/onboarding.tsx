@@ -153,6 +153,16 @@ function toGender(value: string | null): Gender {
   return match ?? 'Female'
 }
 
+/** Falls back to employee when a staff record carries an unknown category. */
+function toEmploymentCategory(
+  value: string | null | undefined,
+): StaffDetailsValues['employment_category'] {
+  const match = EMPLOYMENT_CATEGORIES.find(
+    (category) => category === value?.trim().toLowerCase(),
+  )
+  return match ?? 'employee'
+}
+
 /* -------------------------------------------------------------------------- */
 /*  Page                                                                      */
 /* -------------------------------------------------------------------------- */
@@ -366,20 +376,37 @@ function DetailsPhase({
       state_id: draft?.state_id ?? '',
       lga_id: draft?.lga_id ?? '',
       city_id: draft?.city_id ?? '',
-      department_id: draft?.department_id ?? '',
-      position: draft?.position ?? application?.job_title ?? '',
-      appointment_date: draft?.appointment_date ?? '',
-      employment_category: draft?.employment_category ?? 'employee',
-      bank_name: draft?.bank_name ?? '',
-      bank_account_name: draft?.bank_account_name ?? '',
-      bank_account_number: draft?.bank_account_number ?? '',
-      guarantor_name: draft?.guarantor_name ?? '',
-      guarantor_relationship: draft?.guarantor_relationship ?? '',
-      guarantor_phone: draft?.guarantor_phone ?? '',
-      guarantor_address: draft?.guarantor_address ?? '',
-      next_of_kin_name: draft?.next_of_kin_name ?? '',
-      next_of_kin_relationship: draft?.next_of_kin_relationship ?? '',
-      next_of_kin_phone: draft?.next_of_kin_phone ?? '',
+      department_id: draft?.department_id ?? prefill?.department_id ?? '',
+      position:
+        draft?.position ?? prefill?.position ?? application?.job_title ?? '',
+      appointment_date:
+        draft?.appointment_date ??
+        dateInputValue(prefill?.appointment_date),
+      employment_category:
+        draft?.employment_category ??
+        toEmploymentCategory(prefill?.employment_category),
+      bank_name: draft?.bank_name ?? prefill?.bank_name ?? '',
+      bank_account_name:
+        draft?.bank_account_name ?? prefill?.bank_account_name ?? '',
+      bank_account_number:
+        draft?.bank_account_number ?? prefill?.bank_account_number ?? '',
+      guarantor_name: draft?.guarantor_name ?? prefill?.guarantor_name ?? '',
+      guarantor_relationship:
+        draft?.guarantor_relationship ??
+        prefill?.guarantor_relationship ??
+        '',
+      guarantor_phone:
+        draft?.guarantor_phone ?? prefill?.guarantor_phone ?? '',
+      guarantor_address:
+        draft?.guarantor_address ?? prefill?.guarantor_address ?? '',
+      next_of_kin_name:
+        draft?.next_of_kin_name ?? prefill?.next_of_kin_name ?? '',
+      next_of_kin_relationship:
+        draft?.next_of_kin_relationship ??
+        prefill?.next_of_kin_relationship ??
+        '',
+      next_of_kin_phone:
+        draft?.next_of_kin_phone ?? prefill?.next_of_kin_phone ?? '',
       // Files are never stored in a draft or prefilled from the application.
       id_document: undefined,
       qualification_certificates: undefined,

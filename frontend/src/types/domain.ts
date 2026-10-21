@@ -194,6 +194,7 @@ export interface AccessCode {
   code_hint: string
   type: AccessCodeType
   application_id: string | null
+  staff_profile_id: string | null
   issued_to: string | null
   issued_by: string | null
   status: AccessCodeStatus
@@ -410,6 +411,20 @@ export interface StaffRedeemPrefill {
   date_of_birth?: string | null
   location_id?: string | null
   address_line?: string | null
+  employment_category?: EmploymentCategory | null
+  department_id?: string | null
+  position?: string | null
+  appointment_date?: string | null
+  bank_name?: string | null
+  bank_account_name?: string | null
+  bank_account_number?: string | null
+  guarantor_name?: string | null
+  guarantor_phone?: string | null
+  guarantor_address?: string | null
+  guarantor_relationship?: string | null
+  next_of_kin_name?: string | null
+  next_of_kin_phone?: string | null
+  next_of_kin_relationship?: string | null
 }
 
 /** Response from POST /staff/redeem. */

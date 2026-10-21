@@ -47,6 +47,7 @@ import type {
   AccessCodeStatus,
   AccessCodeType,
   Application,
+  StaffProfile,
 } from '@/types/domain'
 
 const PER_PAGE = 10
@@ -464,7 +465,9 @@ function IssueAccessCodeDialog({
 }) {
   const queryClient = useQueryClient()
 
-  const [applicationId, setApplicationId] = React.useState('')
+  // A target is either "staff:<profile-id>" (an existing staff record) or
+  // "application:<id>" (a shortlisted/appointed applicant not yet onboarded).
+  const [target, setTarget] = React.useState('')
   const [codeType, setCodeType] = React.useState<AccessCodeType>('staff')
   const [issuedCode, setIssuedCode] = React.useState<string | null>(null)
   const [copied, setCopied] = React.useState(false)
@@ -481,17 +484,44 @@ function IssueAccessCodeDialog({
     enabled: open,
   })
 
+  const staffQuery = useQuery({
+    queryKey: ['staff', 'issuable'],
+    queryFn: () => adminApi.listStaff({ per_page: 200 }),
+    enabled: open && codeType === 'staff',
+  })
+
+  const staff: StaffProfile[] = React.useMemo(
+    () =>
+      (staffQuery.data?.items ?? []).filter((member) => member.status !== 'exited'),
+    [staffQuery.data],
+  )
+
+  const staffApplicationIds = React.useMemo(
+    () =>
+      new Set(
+        staff
+          .map((member) => member.application_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    [staff],
+  )
+
   const issuable: Application[] = React.useMemo(
     () =>
       (applicationsQuery.data?.items ?? []).filter(
-        (app) => app.status === 'shortlisted' || app.status === 'appointed',
+        (app) =>
+          (app.status === 'shortlisted' || app.status === 'appointed') &&
+          // A candidate who already has a staff profile is activated from
+          // that record, so do not offer the same person twice.
+          !staffApplicationIds.has(app.id),
       ),
-    [applicationsQuery.data],
+    [applicationsQuery.data, staffApplicationIds],
   )
 
   const issueMutation = useMutation({
     mutationFn: (payload: {
-      application_id: string
+      application_id?: string
+      staff_id?: string
       type: AccessCodeType
     }) => adminApi.issueAccessCode(payload),
     onSuccess: (result) => {
@@ -508,7 +538,7 @@ function IssueAccessCodeDialog({
   })
 
   const reset = () => {
-    setApplicationId('')
+    setTarget('')
     setCodeType('staff')
     setIssuedCode(null)
     setCopied(false)
@@ -530,9 +560,24 @@ function IssueAccessCodeDialog({
     }
   }
 
-  const selectedApplication = issuable.find(
-    (app) => app.id === applicationId,
-  )
+  const targetSeparator = target.indexOf(':')
+  const targetKind = targetSeparator > 0 ? target.slice(0, targetSeparator) : ''
+  const targetId = targetSeparator > 0 ? target.slice(targetSeparator + 1) : ''
+  const selectedStaff =
+    targetKind === 'staff'
+      ? staff.find((member) => member.id === targetId)
+      : undefined
+  const selectedApplication =
+    targetKind === 'application'
+      ? issuable.find((app) => app.id === targetId)
+      : undefined
+  const recipientName = selectedStaff
+    ? `${selectedStaff.first_name} ${selectedStaff.last_name}`
+    : selectedApplication
+      ? `${selectedApplication.first_name} ${selectedApplication.last_name}`
+      : codeType === 'staff'
+        ? 'the staff member'
+        : 'the candidate'
 
   return (
     <Dialog
@@ -547,7 +592,7 @@ function IssueAccessCodeDialog({
         </DialogTitle>
         <DialogDescription>
           {issuedCode
-            ? 'This is the only time the full code is shown. Send it to the candidate over a secure channel.'
+            ? 'This is the only time the full code is shown. Send it to the staff member or candidate over a secure channel.'
             : 'Codes are single-use and time-boxed. Only a hash is stored on the server.'}
         </DialogDescription>
       </DialogHeader>
@@ -580,9 +625,7 @@ function IssueAccessCodeDialog({
                 <p className="mt-1">
                   The server stores only a hash of the code, so it cannot be
                   retrieved, edited or re-sent. Copy it now and pass it to{' '}
-                  {selectedApplication
-                    ? `${selectedApplication.first_name} ${selectedApplication.last_name}`
-                    : 'the candidate'}
+                  {recipientName}
                   . If it is lost, revoke it and issue a new one.
                 </p>
               </div>
@@ -603,36 +646,80 @@ function IssueAccessCodeDialog({
         <form
           onSubmit={(event) => {
             event.preventDefault()
-            if (!applicationId) {
-              toast.error('Select the candidate this code is for.')
+            if (!targetKind || !targetId) {
+              toast.error(
+                codeType === 'staff'
+                  ? 'Select the staff member or applicant this code is for.'
+                  : 'Select the candidate this code is for.',
+              )
+              return
+            }
+            if (targetKind === 'staff') {
+              issueMutation.mutate({ staff_id: targetId, type: 'staff' })
               return
             }
             issueMutation.mutate({
-              application_id: applicationId,
+              application_id: targetId,
               type: codeType,
             })
           }}
         >
           <DialogBody className="space-y-4">
             <Field
-              label="Candidate"
-              htmlFor="access-code-candidate"
+              label={
+                codeType === 'staff'
+                  ? 'Staff member or applicant'
+                  : 'Candidate'
+              }
+              htmlFor="access-code-target"
               required
-              hint="Only shortlisted or appointed applicants can receive an access code."
+              hint={
+                codeType === 'staff'
+                  ? 'Choose an existing staff record to activate their portal account, or a shortlisted/appointed applicant to onboard them.'
+                  : 'Only shortlisted or appointed applicants can receive an access code.'
+              }
             >
               <Select
-                id="access-code-candidate"
-                value={applicationId}
-                onChange={(e) => setApplicationId(e.target.value)}
+                id="access-code-target"
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
                 required
               >
-                <option value="">Select a candidate…</option>
-                {issuable.map((app) => (
-                  <option key={app.id} value={app.id}>
-                    {app.first_name} {app.last_name} —{' '}
-                    {app.job_title ?? 'No role'} ({app.application_number})
-                  </option>
-                ))}
+                <option value="">
+                  {codeType === 'staff'
+                    ? 'Select a staff member or applicant…'
+                    : 'Select a candidate…'}
+                </option>
+                {codeType === 'staff' && staff.length > 0 && (
+                  <optgroup label="Staff records">
+                    {staff.map((member) => (
+                      <option key={`staff:${member.id}`} value={`staff:${member.id}`}>
+                        {member.first_name} {member.last_name} — {member.staff_id}
+                        {member.position
+                          ? ` (${member.position})`
+                          : member.department_name
+                            ? ` (${member.department_name})`
+                            : ''}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {issuable.length > 0 && (
+                  <optgroup
+                    label={
+                      codeType === 'staff'
+                        ? 'Applicants not yet onboarded'
+                        : 'Shortlisted / appointed applicants'
+                    }
+                  >
+                    {issuable.map((app) => (
+                      <option key={`application:${app.id}`} value={`application:${app.id}`}>
+                        {app.first_name} {app.last_name} —{' '}
+                        {app.job_title ?? 'No role'} ({app.application_number})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </Select>
             </Field>
 
@@ -645,7 +732,10 @@ function IssueAccessCodeDialog({
                 <Select
                   id="access-code-type-issue"
                   value={codeType}
-                  onChange={(e) => setCodeType(e.target.value as AccessCodeType)}
+                  onChange={(e) => {
+                    setCodeType(e.target.value as AccessCodeType)
+                    setTarget('')
+                  }}
                 >
                   <option value="staff">Staff</option>
                   <option value="applicant">Applicant</option>

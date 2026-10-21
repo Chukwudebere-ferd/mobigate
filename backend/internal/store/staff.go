@@ -22,11 +22,14 @@ import (
 // Redemption is the result of a successful code check: the ticket the
 // onboarding form is authorised by, and the context it needs.
 type Redemption struct {
-	CodeID     uuid.UUID
-	TenantID   uuid.UUID
-	IssuedTo   *uuid.UUID
-	CodeType   models.AccessCodeType
+	CodeID      uuid.UUID
+	TenantID    uuid.UUID
+	IssuedTo    *uuid.UUID
+	CodeType    models.AccessCodeType
 	Application *models.Application
+	// Staff is the existing staff record the code targets, when any. Its
+	// details prefill the form and onboarding updates the same profile.
+	Staff *models.StaffProfile
 	// Departments is the tenant's list for the employment section.
 	Departments []models.Department
 }
@@ -64,19 +67,20 @@ func (s *Store) RedeemAccessCode(ctx context.Context, enteredCode, remoteIP stri
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	var (
-		maxAttempts  int
-		codeIDRaw    string
-		tenantRaw    string
-		status       models.AccessCodeStatus
-		expiresAt    time.Time
-		failedCount  int
-		issuedTo     *string
-		codeType     models.AccessCodeType
-		applicationID *uuid.UUID
+		maxAttempts    int
+		codeIDRaw      string
+		tenantRaw      string
+		status         models.AccessCodeStatus
+		expiresAt      time.Time
+		failedCount    int
+		issuedTo       *string
+		codeType       models.AccessCodeType
+		applicationID  *uuid.UUID
+		staffProfileID *uuid.UUID
 	)
 	err = tx.QueryRow(ctx, `
 		SELECT c.id, c.tenant_id, c.status, c.expires_at, c.failed_attempts,
-		       c.issued_to, c.type, c.application_id,
+		       c.issued_to, c.type, c.application_id, c.staff_profile_id,
 		       s.access_code_max_attempts
 		FROM access_codes c
 		CROSS JOIN admin_settings s
@@ -84,7 +88,7 @@ func (s *Store) RedeemAccessCode(ctx context.Context, enteredCode, remoteIP stri
 		FOR UPDATE`,
 		hash,
 	).Scan(&codeIDRaw, &tenantRaw, &status, &expiresAt, &failedCount,
-		&issuedTo, &codeType, &applicationID, &maxAttempts)
+		&issuedTo, &codeType, &applicationID, &staffProfileID, &maxAttempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Unknown code: no row to increment, but the attempt is still
 		// auditable through rate limiting at the HTTP layer.
@@ -169,6 +173,15 @@ func (s *Store) RedeemAccessCode(ctx context.Context, enteredCode, remoteIP stri
 		}
 		if err == nil {
 			redemption.Application = &application
+		}
+	}
+	if staffProfileID != nil {
+		staff, err := staffByIDUsing(ctx, tx, &tenantID, *staffProfileID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return Redemption{}, err
+		}
+		if err == nil {
+			redemption.Staff = &staff
 		}
 	}
 
@@ -257,19 +270,22 @@ func (s *Store) DeleteStaffDraft(ctx context.Context, tx pgx.Tx, userID, codeID 
 // ticket from completing onboarding twice.
 func (s *Store) RedeemAccessCodeByID(ctx context.Context, codeID, userID uuid.UUID) (Redemption, error) {
 	var (
-		rawTenantID   string
-		status        models.AccessCodeStatus
-		expiresAt     time.Time
-		codeType      models.AccessCodeType
-		issuedTo      *string
-		applicationID *uuid.UUID
+		rawTenantID    string
+		status         models.AccessCodeStatus
+		expiresAt      time.Time
+		codeType       models.AccessCodeType
+		issuedTo       *string
+		applicationID  *uuid.UUID
+		staffProfileID *uuid.UUID
 	)
 	err := s.pool.QueryRow(ctx, `
-		SELECT tenant_id, status, expires_at, type, issued_to, application_id
+		SELECT tenant_id, status, expires_at, type, issued_to, application_id,
+		       staff_profile_id
 		FROM access_codes
 		WHERE id = $1`,
 		codeID,
-	).Scan(&rawTenantID, &status, &expiresAt, &codeType, &issuedTo, &applicationID)
+	).Scan(&rawTenantID, &status, &expiresAt, &codeType, &issuedTo,
+		&applicationID, &staffProfileID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Redemption{}, ErrNotFound
 	}
@@ -312,6 +328,15 @@ func (s *Store) RedeemAccessCodeByID(ctx context.Context, codeID, userID uuid.UU
 		}
 		if err == nil {
 			redemption.Application = &application
+		}
+	}
+	if staffProfileID != nil {
+		staff, err := staffByIDUsing(ctx, s.pool, &tenantID, *staffProfileID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return Redemption{}, err
+		}
+		if err == nil {
+			redemption.Staff = &staff
 		}
 	}
 	departments, err := s.ListDepartments(ctx, &tenantID)
@@ -362,23 +387,23 @@ func (s *Store) DocumentByID(ctx context.Context, id uuid.UUID) (models.Document
 
 // OnboardingInput is the full staff details form (README §4.4 step 5).
 type OnboardingInput struct {
-	CodeID   uuid.UUID
-	UserID   uuid.UUID
+	CodeID      uuid.UUID
+	UserID      uuid.UUID
 	StaffUserID uuid.UUID
 
-	FirstName  string
-	LastName   string
-	Email      string
-	Phone      string
-	Gender     *string
+	FirstName   string
+	LastName    string
+	Email       string
+	Phone       string
+	Gender      *string
 	DateOfBirth *time.Time
 	AddressLine *string
-	LocationID *uuid.UUID
+	LocationID  *uuid.UUID
 
 	EmploymentCategory models.EmploymentCategory
-	DepartmentID *uuid.UUID
-	Position     *string
-	AppointmentDate *time.Time
+	DepartmentID       *uuid.UUID
+	Position           *string
+	AppointmentDate    *time.Time
 
 	BankName          *string
 	BankAccountName   *string
@@ -428,17 +453,22 @@ func (s *Store) CompleteOnboarding(ctx context.Context, in OnboardingInput) (mod
 	defer tx.Rollback(ctx) //nolint:errcheck
 
 	// The code must still be active; redemption may have been a while ago.
+	// A code linked to a staff profile may be unbound until that member signs
+	// in, so issued_to NULL is accepted only for the staff-profile path.
 	var (
-		rawTenantID string
-		status      models.AccessCodeStatus
-		expiresAt   time.Time
+		rawTenantID    string
+		status         models.AccessCodeStatus
+		expiresAt      time.Time
+		staffProfileID *uuid.UUID
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT tenant_id, status, expires_at FROM access_codes
-		WHERE id = $1 AND issued_to = $2
+		SELECT tenant_id, status, expires_at, staff_profile_id
+		FROM access_codes
+		WHERE id = $1
+		  AND (issued_to = $2 OR (issued_to IS NULL AND staff_profile_id IS NOT NULL))
 		FOR UPDATE`,
 		in.CodeID, in.UserID,
-	).Scan(&rawTenantID, &status, &expiresAt)
+	).Scan(&rawTenantID, &status, &expiresAt, &staffProfileID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.StaffProfile{}, ErrNotFound
 	}
@@ -453,68 +483,19 @@ func (s *Store) CompleteOnboarding(ctx context.Context, in OnboardingInput) (mod
 		return models.StaffProfile{}, err
 	}
 
-	// Allocate the Staff ID atomically, seeded above imported records.
-	var stateCode string
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(NULLIF(l.code, ''), NULLIF(l.slug, ''), 'NG')
-		FROM tenants t
-		LEFT JOIN locations l ON l.id = t.state_location_id
-		WHERE t.id = $1`, tenantID).Scan(&stateCode); err != nil {
-		return models.StaffProfile{}, err
-	}
-	stateCode = strings.ToUpper(stateCode)
-	year := time.Now().Year()
-
-	startAt := 1
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE(MAX((regexp_match(staff_id, '/([0-9]+)$'))[1]::int), 0) + 1
-		FROM staff_profiles
-		WHERE tenant_id = $1 AND staff_id LIKE $2`,
-		tenantID, fmt.Sprintf("STA/%s/%d/%%", stateCode, year),
-	).Scan(&startAt); err != nil {
-		return models.StaffProfile{}, err
-	}
-	seq, err := sequence.New(s.pool).Next(
-		ctx, tx, sequence.ScopeStaff, tenantID.String(), year, "STA", stateCode, startAt,
-	)
-	if err != nil {
-		return models.StaffProfile{}, err
-	}
-	staffID := codes.FormatStaffID(stateCode, year, seq)
-
 	var (
-		rawProfileID string
-		createdAt    time.Time
+		profileID uuid.UUID
+		staffID   string
 	)
-	err = tx.QueryRow(ctx, `
-		INSERT INTO staff_profiles (
-			tenant_id, user_id, staff_id, application_id, employment_category,
-			first_name, last_name, email, phone, gender, date_of_birth,
-			address_line, location_id, bank_name, bank_account_name,
-			bank_account_number, guarantor_name, guarantor_phone,
-			guarantor_address, guarantor_relationship, next_of_kin_name,
-			next_of_kin_phone, next_of_kin_relationship, department_id,
-			position, appointment_date, rules_of_engagement_accepted_at,
-			status
-		) VALUES (
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-			$19,$20,$21,$22,$23,$24,$25,$26,$27,'active'
+	if staffProfileID != nil {
+		profileID, staffID, err = updateOnboardingStaffProfile(
+			ctx, tx, tenantID, *staffProfileID, &in,
 		)
-		RETURNING id, created_at`,
-		tenantID, in.StaffUserID, staffID, in.ApplicationID(), in.EmploymentCategory,
-		strings.TrimSpace(in.FirstName), strings.TrimSpace(in.LastName),
-		strings.ToLower(strings.TrimSpace(in.Email)), strings.TrimSpace(in.Phone),
-		in.Gender, in.DateOfBirth, in.AddressLine, in.LocationID,
-		in.BankName, in.BankAccountName, in.BankAccountNumber,
-		in.GuarantorName, in.GuarantorPhone, in.GuarantorAddress,
-		in.GuarantorRelationship, in.NextOfKinName, in.NextOfKinPhone,
-		in.NextOfKinRelationship, in.DepartmentID, in.Position,
-		in.AppointmentDate, time.Now(),
-	).Scan(&rawProfileID, &createdAt)
-	if err != nil {
-		return models.StaffProfile{}, mapWriteError(err)
+	} else {
+		profileID, staffID, err = s.createOnboardingStaffProfile(
+			ctx, tx, tenantID, &in,
+		)
 	}
-	profileID, err := uuid.Parse(rawProfileID)
 	if err != nil {
 		return models.StaffProfile{}, err
 	}
@@ -600,6 +581,151 @@ func (s *Store) CompleteOnboarding(ctx context.Context, in OnboardingInput) (mod
 	return s.GetStaff(ctx, &tenantID, profileID)
 }
 
+// createOnboardingStaffProfile allocates a fresh Staff ID and inserts the
+// completed profile. It is used when the code targets a job application.
+func (s *Store) createOnboardingStaffProfile(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID uuid.UUID,
+	in *OnboardingInput,
+) (uuid.UUID, string, error) {
+	// Allocate the Staff ID atomically, seeded above imported records.
+	var stateCode string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(NULLIF(l.code, ''), NULLIF(l.slug, ''), 'NG')
+		FROM tenants t
+		LEFT JOIN locations l ON l.id = t.state_location_id
+		WHERE t.id = $1`, tenantID).Scan(&stateCode); err != nil {
+		return uuid.Nil, "", err
+	}
+	stateCode = strings.ToUpper(stateCode)
+	year := time.Now().Year()
+
+	startAt := 1
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(MAX((regexp_match(staff_id, '/([0-9]+)$'))[1]::int), 0) + 1
+		FROM staff_profiles
+		WHERE tenant_id = $1 AND staff_id LIKE $2`,
+		tenantID, fmt.Sprintf("STA/%s/%d/%%", stateCode, year),
+	).Scan(&startAt); err != nil {
+		return uuid.Nil, "", err
+	}
+	seq, err := sequence.New(s.pool).Next(
+		ctx, tx, sequence.ScopeStaff, tenantID.String(), year, "STA", stateCode, startAt,
+	)
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+	staffID := codes.FormatStaffID(stateCode, year, seq)
+
+	var rawProfileID string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO staff_profiles (
+			tenant_id, user_id, staff_id, application_id, employment_category,
+			first_name, last_name, email, phone, gender, date_of_birth,
+			address_line, location_id, bank_name, bank_account_name,
+			bank_account_number, guarantor_name, guarantor_phone,
+			guarantor_address, guarantor_relationship, next_of_kin_name,
+			next_of_kin_phone, next_of_kin_relationship, department_id,
+			position, appointment_date, rules_of_engagement_accepted_at,
+			status
+		) VALUES (
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+			$19,$20,$21,$22,$23,$24,$25,$26,$27,'active'
+		)
+		RETURNING id`,
+		tenantID, in.StaffUserID, staffID, in.ApplicationID(), in.EmploymentCategory,
+		strings.TrimSpace(in.FirstName), strings.TrimSpace(in.LastName),
+		strings.ToLower(strings.TrimSpace(in.Email)), strings.TrimSpace(in.Phone),
+		in.Gender, in.DateOfBirth, in.AddressLine, in.LocationID,
+		in.BankName, in.BankAccountName, in.BankAccountNumber,
+		in.GuarantorName, in.GuarantorPhone, in.GuarantorAddress,
+		in.GuarantorRelationship, in.NextOfKinName, in.NextOfKinPhone,
+		in.NextOfKinRelationship, in.DepartmentID, in.Position,
+		in.AppointmentDate, time.Now(),
+	).Scan(&rawProfileID)
+	if err != nil {
+		return uuid.Nil, "", mapWriteError(err)
+	}
+	profileID, err := uuid.Parse(rawProfileID)
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+	return profileID, staffID, nil
+}
+
+// updateOnboardingStaffProfile completes an existing staff record created by
+// an admin. The Staff ID and application link are preserved; only the account
+// attachment and the details from the form change.
+func updateOnboardingStaffProfile(
+	ctx context.Context,
+	tx pgx.Tx,
+	tenantID uuid.UUID,
+	profileID uuid.UUID,
+	in *OnboardingInput,
+) (uuid.UUID, string, error) {
+	var (
+		rawID, staffID string
+		rawUserID      *string
+	)
+	err := tx.QueryRow(ctx, `
+		SELECT id, staff_id, user_id FROM staff_profiles
+		WHERE id = $1 AND tenant_id = $2
+		FOR UPDATE`, profileID, tenantID,
+	).Scan(&rawID, &staffID, &rawUserID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, "", ErrNotFound
+	}
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+	if rawUserID != nil {
+		linkedUserID, err := uuid.Parse(*rawUserID)
+		if err != nil {
+			return uuid.Nil, "", err
+		}
+		if linkedUserID != in.StaffUserID {
+			return uuid.Nil, "", fmt.Errorf("%w: this staff record is already linked to another account", ErrValidation)
+		}
+	}
+
+	var updatedID string
+	err = tx.QueryRow(ctx, `
+		UPDATE staff_profiles SET
+			user_id = $2, employment_category = $3, first_name = $4,
+			last_name = $5, email = $6, phone = $7, gender = $8,
+			date_of_birth = $9, address_line = $10, location_id = $11,
+			bank_name = $12, bank_account_name = $13, bank_account_number = $14,
+			guarantor_name = $15, guarantor_phone = $16,
+			guarantor_address = $17, guarantor_relationship = $18,
+			next_of_kin_name = $19, next_of_kin_phone = $20,
+			next_of_kin_relationship = $21, department_id = $22,
+			position = $23, appointment_date = $24,
+			rules_of_engagement_accepted_at =
+				COALESCE(rules_of_engagement_accepted_at, now()),
+			status = 'active', updated_at = now()
+		WHERE id = $1
+		RETURNING id`,
+		profileID, in.StaffUserID, in.EmploymentCategory,
+		strings.TrimSpace(in.FirstName), strings.TrimSpace(in.LastName),
+		strings.ToLower(strings.TrimSpace(in.Email)), strings.TrimSpace(in.Phone),
+		in.Gender, in.DateOfBirth, in.AddressLine, in.LocationID,
+		in.BankName, in.BankAccountName, in.BankAccountNumber,
+		in.GuarantorName, in.GuarantorPhone, in.GuarantorAddress,
+		in.GuarantorRelationship, in.NextOfKinName, in.NextOfKinPhone,
+		in.NextOfKinRelationship, in.DepartmentID, in.Position,
+		in.AppointmentDate,
+	).Scan(&updatedID)
+	if err != nil {
+		return uuid.Nil, "", mapWriteError(err)
+	}
+	updatedUUID, err := uuid.Parse(updatedID)
+	if err != nil {
+		return uuid.Nil, "", err
+	}
+	return updatedUUID, staffID, nil
+}
+
 // ApplicationID derives the pointer for the profile insert; kept as a
 // method so the long insert statement stays readable.
 func (in *OnboardingInput) ApplicationID() *uuid.UUID {
@@ -651,8 +777,8 @@ func (s *Store) StaffDocuments(ctx context.Context, staffID uuid.UUID) ([]models
 // applicant owns, returning its storage key for a signed URL.
 func (s *Store) MyApplicationPhoto(ctx context.Context, applicantID, applicationID uuid.UUID) (models.Document, error) {
 	var (
-		document models.Document
-		rawID    string
+		document  models.Document
+		rawID     string
 		rawTenant *string
 		rawOwner  string
 	)
@@ -704,10 +830,10 @@ func (s *Store) documentsFor(ctx context.Context, ownerType string, ownerID uuid
 	items := make([]models.Document, 0)
 	for rows.Next() {
 		var (
-			document   models.Document
-			rawID      string
-			rawTenant  *string
-			rawOwner   string
+			document  models.Document
+			rawID     string
+			rawTenant *string
+			rawOwner  string
 		)
 		if err := rows.Scan(
 			&rawID, &rawTenant, &document.OwnerType, &rawOwner,
