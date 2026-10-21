@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mobigate/mgm-portal/internal/auth"
-	"github.com/mobigate/mgm-portal/internal/codes"
 	"github.com/mobigate/mgm-portal/internal/models"
 	"github.com/mobigate/mgm-portal/internal/store"
 )
@@ -28,6 +27,9 @@ type Handler struct {
 	// AllowedOrigins lists browser origins permitted to make state-changing
 	// requests. Same-origin requests are always allowed.
 	AllowedOrigins []string
+	// AuthBaseURL is the Better Auth service used for identity operations
+	// that must stay inside Better Auth (password changes, account creation).
+	AuthBaseURL string
 }
 
 // Register mounts every MVP route on the given router.
@@ -140,16 +142,21 @@ func (h *Handler) registerAdminRoutes(r chi.Router) {
 	r.Post("/shortlists", h.createShortlist)
 	r.Get("/shortlists", h.listShortlists)
 	r.Patch("/shortlists/{id}", h.revokeShortlist)
+	r.Post("/shortlists/{id}/resend", h.resendShortlist)
 
 	r.Get("/interviews", h.listInterviews)
 	r.Post("/interviews", h.createInterview)
 	r.Patch("/interviews/{id}", h.updateInterview)
+	r.Post("/interviews/{id}/notify", h.notifyInterview)
 
 	r.Get("/access-codes", h.listAccessCodes)
 	r.Post("/access-codes", h.issueAccessCode)
 	r.Patch("/access-codes/{id}", h.revokeAccessCode)
+	r.Get("/settings/access-codes", h.getAccessCodeSettings)
+	r.Patch("/settings/access-codes", h.updateAccessCodeSettings)
 
 	r.Get("/staff", h.listStaff)
+	r.Post("/staff", h.createStaff)
 	r.Get("/staff/{id}", h.getStaff)
 
 	r.Get("/locations", h.listLocations)
@@ -158,8 +165,12 @@ func (h *Handler) registerAdminRoutes(r chi.Router) {
 
 	r.Get("/departments", h.listDepartments)
 	r.Get("/users", h.listUsers)
-	r.Patch("/users/{id}", h.approveUser)
+	r.Post("/users", h.createAdminUser)
+	r.Patch("/users/{id}", h.updateUser)
+	r.Post("/users/{id}/reset-password", h.resetUserPassword)
 	r.Get("/templates", h.listTemplates)
+	r.Patch("/templates/{id}", h.updateTemplate)
+	r.Post("/templates/{id}/test", h.testTemplate)
 	r.Get("/notifications", h.listNotifications)
 	r.Get("/audit-logs", h.listAuditLogs)
 }
@@ -316,17 +327,17 @@ func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listJobs(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/jobs -> 200 { "items": Job[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.Job{}})
+	h.listJobsAdmin(w, r)
 }
 
 func (h *Handler) createJob(w http.ResponseWriter, r *http.Request) {
 	// POST /admin/jobs -> 201 Job
-	writeJSON(w, http.StatusCreated, models.Job{})
+	h.saveJob(w, r, false)
 }
 
 func (h *Handler) updateJob(w http.ResponseWriter, r *http.Request) {
 	// PATCH /admin/jobs/{id} -> 200 Job
-	writeJSON(w, http.StatusOK, models.Job{})
+	h.saveJob(w, r, true)
 }
 
 func (h *Handler) listApplications(w http.ResponseWriter, r *http.Request) {
@@ -418,12 +429,12 @@ func (h *Handler) listApplications(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) getApplication(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/applications/{id} -> 200 Application | 404
-	writeJSON(w, http.StatusOK, models.Application{})
+	h.getApplicationAdmin(w, r)
 }
 
 func (h *Handler) applicationEvents(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/applications/{id}/events -> 200 { "items": ApplicationEvent[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.ApplicationEvent{}})
+	h.applicationEventsAdmin(w, r)
 }
 
 func (h *Handler) setApplicationStatus(w http.ResponseWriter, r *http.Request) {
@@ -431,7 +442,7 @@ func (h *Handler) setApplicationStatus(w http.ResponseWriter, r *http.Request) {
 	// Body: { status, reason? }
 	// 200 -> Application
 	// 409 -> illegal transition
-	writeJSON(w, http.StatusOK, models.Application{})
+	h.setApplicationStatusAdmin(w, r)
 }
 
 func (h *Handler) createShortlist(w http.ResponseWriter, r *http.Request) {
@@ -439,18 +450,18 @@ func (h *Handler) createShortlist(w http.ResponseWriter, r *http.Request) {
 	// Body: { application_ids: []uuid, message: string, job_id: uuid }
 	// 201 -> { "items": Shortlist[] }
 	// 400 -> message is empty (BR-07)
-	writeJSON(w, http.StatusCreated, map[string]any{"items": []models.Shortlist{}})
+	h.createShortlistAdmin(w, r)
 }
 
 func (h *Handler) listShortlists(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/shortlists -> 200 { "items": Shortlist[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.Shortlist{}})
+	h.listShortlistsAdmin(w, r)
 }
 
 func (h *Handler) revokeShortlist(w http.ResponseWriter, r *http.Request) {
 	// PATCH /admin/shortlists/{id}  Body: { status: "revoked" }
 	// 200 -> Shortlist
-	writeJSON(w, http.StatusOK, models.Shortlist{})
+	h.revokeShortlistAdmin(w, r)
 }
 
 func (h *Handler) listInterviews(w http.ResponseWriter, r *http.Request) {
@@ -471,12 +482,12 @@ func (h *Handler) createInterview(w http.ResponseWriter, r *http.Request) {
 	// POST /admin/interviews
 	// Body: { job_id, interview_at, venue, instructions, audience }
 	// 201 -> InterviewAnnouncement
-	writeJSON(w, http.StatusCreated, models.InterviewAnnouncement{})
+	h.createInterviewAdmin(w, r)
 }
 
 func (h *Handler) updateInterview(w http.ResponseWriter, r *http.Request) {
 	// PATCH /admin/interviews/{id} -> 200 InterviewAnnouncement
-	writeJSON(w, http.StatusOK, models.InterviewAnnouncement{})
+	h.updateInterviewAdmin(w, r)
 }
 
 func (h *Handler) listAccessCodes(w http.ResponseWriter, r *http.Request) {
@@ -486,7 +497,7 @@ func (h *Handler) listAccessCodes(w http.ResponseWriter, r *http.Request) {
 	//
 	// Only code_hint is ever returned. The plaintext is not recoverable
 	// because it is not stored (BR-17).
-	writeJSON(w, http.StatusOK, map[string]any{})
+	h.listAccessCodesAdmin(w, r)
 }
 
 func (h *Handler) issueAccessCode(w http.ResponseWriter, r *http.Request) {
@@ -496,67 +507,64 @@ func (h *Handler) issueAccessCode(w http.ResponseWriter, r *http.Request) {
 	//
 	// The plaintext code is returned exactly once, in this response. It is
 	// hashed before storage and cannot be retrieved afterwards.
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"code":   codes.GenerateAccessCodeMock(),
-		"record": models.AccessCode{},
-	})
+	h.issueAccessCodeAdmin(w, r)
 }
 
 func (h *Handler) revokeAccessCode(w http.ResponseWriter, r *http.Request) {
 	// PATCH /admin/access-codes/{id} -> 200 AccessCode
-	writeJSON(w, http.StatusOK, models.AccessCode{})
+	h.revokeAccessCodeAdmin(w, r)
 }
 
 func (h *Handler) listStaff(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/staff -> 200 Paginated<StaffProfile>
-	writeJSON(w, http.StatusOK, map[string]any{})
+	h.listStaffAdmin(w, r)
 }
 
 func (h *Handler) getStaff(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/staff/{id} -> 200 StaffProfile | 404
-	writeJSON(w, http.StatusOK, models.StaffProfile{})
+	h.getStaffAdmin(w, r)
 }
 
 func (h *Handler) listLocations(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/locations -> 200 { "items": Location[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.Location{}})
+	h.listLocationsAdmin(w, r)
 }
 
 func (h *Handler) createLocation(w http.ResponseWriter, r *http.Request) {
 	// POST /admin/locations
 	// Body: { type, name, parent_id, code? }
 	// 201 -> Location (status = "pending", awaiting Super Admin approval)
-	writeJSON(w, http.StatusCreated, models.Location{})
+	h.createLocationAdmin(w, r)
 }
 
 func (h *Handler) approveLocation(w http.ResponseWriter, r *http.Request) {
 	// PATCH /admin/locations/{id} -> 200 Location
-	writeJSON(w, http.StatusOK, models.Location{})
+	h.approveLocationAdmin(w, r)
 }
 
 func (h *Handler) listDepartments(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/departments -> 200 { "items": Department[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.Department{}})
+	h.listDepartmentsAdmin(w, r)
 }
 
 func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/users -> 200 { "items": User[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.User{}})
+	h.listUsersAdmin(w, r)
 }
 
 func (h *Handler) approveUser(w http.ResponseWriter, r *http.Request) {
 	// PATCH /admin/users/{id} -> 200 User
-	writeJSON(w, http.StatusOK, models.User{})
+	h.approveUserAdmin(w, r)
 }
 
 func (h *Handler) listTemplates(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/templates -> 200 { "items": MessageTemplate[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.MessageTemplate{}})
+	h.listTemplatesAdmin(w, r)
 }
 
 func (h *Handler) listNotifications(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/notifications -> 200 { "items": Notification[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.Notification{}})
+	h.listNotificationsAdmin(w, r)
 }
 
 func (h *Handler) listAuditLogs(w http.ResponseWriter, r *http.Request) {

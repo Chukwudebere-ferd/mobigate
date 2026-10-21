@@ -191,7 +191,7 @@ export function AdminInterviewsPage() {
     onSuccess: (_data, vars) => {
       toast.success(
         vars.status === 'cancelled'
-          ? 'Announcement cancelled — candidates will be notified'
+          ? 'Announcement cancelled'
           : 'Announcement published',
       )
       queryClient.invalidateQueries({ queryKey: ['interviews'] })
@@ -202,21 +202,25 @@ export function AdminInterviewsPage() {
   })
 
   const notifyMutation = useMutation({
-    // The real send is a queued job on the server; the API has no synchronous
-    // notify endpoint yet, so the mutation only reflects the enqueue.
-    mutationFn: async (announcement: InterviewAnnouncement) => {
-      await new Promise((resolve) => setTimeout(resolve, 350))
-      return announcement
-    },
-    onSuccess: (announcement) => {
-      const count = announcement.applicant_count ?? 0
+    mutationFn: (announcement: InterviewAnnouncement) =>
+      adminApi.notifyInterview(announcement.id),
+    onSuccess: (result) => {
       toast.success(
-        `Notification queued for ${count} candidate${count === 1 ? '' : 's'}`,
+        result.queued === 0
+          ? 'Every eligible candidate has already been queued.'
+          : `Notification queued for ${result.queued} candidate${
+              result.queued === 1 ? '' : 's'
+            }.`,
       )
       queryClient.invalidateQueries({ queryKey: ['interviews'] })
+      queryClient.invalidateQueries({ queryKey: ['notifications'] })
     },
-    onError: () => {
-      toast.error('Could not queue the notification. Please try again.')
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Could not queue the notification. Please try again.',
+      )
     },
   })
 

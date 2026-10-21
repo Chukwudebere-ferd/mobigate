@@ -49,8 +49,8 @@ The four functional pillars the MVP is judged on:
 
 | Role | Summary |
 |---|---|
-| **Super Admin (State)** | Creates/manages States and Admins; approves new admins and locations. |
-| **Admin** | Issues access codes; manages job postings; views all applications; posts interview announcements; shortlists candidates; adds shortlist confirmation messages; approves staff and sends staff login access codes; generates Staff IDs. |
+| **Super Admin** | Owns the single admin dashboard across all states: locations, admin accounts, jobs, applications, interviews, shortlists, access codes, staff onboarding, templates/settings, notifications, and audit. |
+| **Admin** | Delegated operator using the same admin dashboard, scoped to their own state. There is no separate admin board. |
 | **Applicant (Public User)** | Applies for a job via an online form; checks application/shortlist status; views interview announcements. |
 | **Staff (Appointed Applicant)** | Logs in with an access code; submits staff details/profile; receives an auto-generated Staff ID. |
 
@@ -103,26 +103,28 @@ Retained here so the data model does not block them, but explicitly **out of MVP
 | Approve Admin accounts | ✅ | — | — | — |
 | Approve locations | ✅ | ✅ (propose) | — | — |
 | Manage location hierarchy | ✅ | ✅ | — | — |
-| Post / edit / close jobs | — | ✅ | — | — |
+| Post / edit / close jobs | ✅ | ✅ (own state) | — | — |
 | View all applications (all states) | ✅ | — | — | — |
 | View applications (own state) | ✅ | ✅ | — | — |
 | Filter by State / LGA / Job | ✅ | ✅ | — | — |
 | Search applications | ✅ | ✅ | — | — |
 | Download CV | ✅ | ✅ | — | — |
-| Post interview announcements | — | ✅ | — | — |
-| Send interview notification | — | ✅ | — | — |
+| Post interview announcements | ✅ | ✅ (own state) | — | — |
+| Send interview notification | ✅ | ✅ (own state) | — | — |
 | View interview announcements | — | — | ✅ | ✅ |
-| Shortlist candidates | — | ✅ | — | — |
-| Add shortlist confirmation message | — | ✅ | — | — |
-| Issue access code | — | ✅ | — | — |
-| Revoke access code | ✅ | ✅ | — | — |
-| Approve staff | — | ✅ | — | — |
-| Generate Staff ID | — | ✅ | — | — |
-| View staff details | ✅ | ✅ | — | — |
+| Shortlist candidates | ✅ | ✅ (own state) | — | — |
+| Add shortlist confirmation message | ✅ | ✅ (own state) | — | — |
+| Issue access code | ✅ | ✅ (own state) | — | — |
+| Revoke access code | ✅ | ✅ (own state) | — | — |
+| Approve staff | ✅ | ✅ (own state) | — | — |
+| Generate Staff ID | ✅ | ✅ (own state) | — | — |
+| View staff details | ✅ | ✅ (own state) | — | — |
 | Redeem access code / submit staff details | — | — | — | ✅ |
 | View own application & shortlist status | — | — | ✅ | — |
 | Edit confirmation messages & email templates | ✅ | ✅ (own state) | — | — |
 | View audit log | ✅ | ✅ (own state) | — | — |
+
+Both admin roles use the **same `/admin` dashboard**. The Super Admin sees every state and owns the full capability set; a delegated Admin sees the same screens limited to their own state. There is no second admin board.
 
 ### 3.2 Account lifecycle
 
@@ -146,7 +148,7 @@ staff:        (none) ──▶ redeemed ──▶ active
 1. Super Admin creates the location hierarchy: **Country → State → LGA → City/Town**.
    - LGA (Local Government Area) is the administrative subdivision of a state. Cities and towns sit *inside* an LGA, so the tree is `country → state → lga → city|town`.
    - The v1.0 draft listed the order as `Country → State → City → Town → Local Government`, which places LGA below town. That is not how Nigerian administrative geography works, so the tree is implemented as above. The data model is a generic parent/child tree (§9.2), so if the business later wants a different traversal order it is a configuration change, not a schema change.
-2. Super Admin creates Admin accounts and assigns each a state scope.
+2. If the Super Admin wants to delegate, they create Admin accounts and assign each a state scope. Delegated Admins use the same dashboard, limited to that state.
 3. Admin sets a password from the invite and activates the account.
 4. Super Admin approves the account. Until approved, the Admin can sign in but can perform no action.
 
@@ -327,7 +329,7 @@ Transitions are one-way and recorded in `application_events` with actor, from-st
 
 ### M11 — Dashboard
 
-Admin landing page showing, for the admin's state (and all states for Super Admin):
+The single admin dashboard, owned by the Super Admin and covering all states. Delegated Admins use the same dashboard, filtered to their own state:
 
 | Tile | Metric |
 |---|---|
@@ -370,6 +372,8 @@ Each tile links to the corresponding filtered list. Charts are limited to a sing
 ---
 
 ## 6. Admin panel screens
+
+All screens below belong to one `/admin` dashboard. The Super Admin sees the full set across all states; delegated Admins see the same screens scoped to their state.
 
 | # | Screen | Contents | Primary actions |
 |---|---|---|---|

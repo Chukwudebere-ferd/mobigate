@@ -11,9 +11,11 @@ import {
   Users,
   X,
 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import * as React from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { Avatar } from '@/components/ui/avatar'
+import { adminApi } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { fullName } from '@/lib/format'
 import { useSession } from '@/providers/session-provider'
@@ -28,7 +30,7 @@ interface NavItem {
 
 const primaryNav: NavItem[] = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/admin/applications', label: 'Applications', icon: Briefcase, badge: '96' },
+  { to: '/admin/applications', label: 'Applications', icon: Briefcase },
   { to: '/admin/jobs', label: 'Jobs', icon: CalendarClock },
   { to: '/admin/interviews', label: 'Interviews', icon: MessageSquareText },
   { to: '/admin/shortlists', label: 'Shortlists', icon: Users },
@@ -109,6 +111,15 @@ export function AdminShell() {
     : 'Administrator'
   const roleLabel = user?.role === 'super_admin' ? 'Super Admin' : 'State Admin'
 
+  // The applications badge is the live total for the signed-in admin's scope.
+  // The `admin/applications` prefix lets existing mutations invalidate it.
+  const applicationsCountQuery = useQuery({
+    queryKey: ['admin', 'applications', 'nav-count'],
+    queryFn: () => adminApi.listApplications({ per_page: 1 }),
+    enabled: Boolean(user),
+  })
+  const applicationsCount = applicationsCountQuery.data?.total
+
   // Close the mobile drawer whenever the route changes. Deriving it during
   // render avoids a state update in an effect, which would cause a second
   // render pass on every navigation.
@@ -122,7 +133,7 @@ export function AdminShell() {
     <div className="min-h-dvh bg-ink-50">
       {/* -- Desktop sidebar -- */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-ink-200 bg-white lg:flex">
-        <SidebarContent />
+        <SidebarContent applicationsCount={applicationsCount} />
       </aside>
 
       {/* -- Mobile drawer -- */}
@@ -142,7 +153,7 @@ export function AdminShell() {
             >
               <X className="size-5" />
             </button>
-            <SidebarContent />
+            <SidebarContent applicationsCount={applicationsCount} />
           </aside>
         </div>
       )}
@@ -212,7 +223,19 @@ export function AdminShell() {
   )
 }
 
-function SidebarContent() {
+function SidebarContent({ applicationsCount }: { applicationsCount?: number }) {
+  const navItems = React.useMemo(
+    () =>
+      primaryNav.map((item) =>
+        item.to === '/admin/applications' &&
+        applicationsCount !== undefined &&
+        applicationsCount > 0
+          ? { ...item, badge: String(applicationsCount) }
+          : item,
+      ),
+    [applicationsCount],
+  )
+
   return (
     <>
       <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-ink-200 px-5">
@@ -229,7 +252,7 @@ function SidebarContent() {
         <p className="mb-2 px-3 text-2xs font-semibold tracking-wider text-ink-400 uppercase">
           Recruitment
         </p>
-        <NavSection items={primaryNav} />
+        <NavSection items={navItems} />
 
         <p className="mt-6 mb-2 px-3 text-2xs font-semibold tracking-wider text-ink-400 uppercase">
           Configuration

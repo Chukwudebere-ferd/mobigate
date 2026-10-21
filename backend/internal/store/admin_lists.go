@@ -129,10 +129,12 @@ func (s *Store) ListApplications(ctx context.Context, q ApplicationQuery) (Pagin
 			a.date_of_birth, a.location_id, a.address_line, a.qualification,
 			a.cv_document_id, a.photo_document_id, a.status,
 			a.submitted_at, a.updated_at,
-			j.title AS job_title, l.name AS location_name
+			j.title AS job_title, j.slug AS job_slug,
+			l.name AS location_name, d.file_name AS cv_file_name
 		FROM applications a
 		JOIN jobs j ON j.id = a.job_id
 		LEFT JOIN locations l ON l.id = a.location_id
+		LEFT JOIN documents d ON d.id = a.cv_document_id
 		WHERE ` + whereSQL + `
 		ORDER BY ` + orderColumn + ` ` + orderDirection + `, a.id DESC
 		LIMIT ` + limitParam + ` OFFSET ` + offsetParam
@@ -204,7 +206,9 @@ func scanApplication(row rowScanner) (models.Application, error) {
 		&application.SubmittedAt,
 		&application.UpdatedAt,
 		&application.JobTitle,
+		&application.JobSlug,
 		&application.LocationName,
+		&application.CVFileName,
 	)
 	if err != nil {
 		return models.Application{}, err

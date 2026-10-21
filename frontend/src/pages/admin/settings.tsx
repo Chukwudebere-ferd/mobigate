@@ -35,7 +35,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { EmptyState, TableSkeleton } from '@/components/ui/empty-state'
-import { Field, Input, Textarea } from '@/components/ui/input'
+import { Field, Input, Select, Textarea } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Table,
@@ -103,10 +103,6 @@ const notificationStatusTone: Record<
 }
 
 export function AdminSettingsPage() {
-  // Template edits are held here so a change made in one tab is reflected
-  // when the same template is viewed from another tab.
-  const { edits, applyEdit } = useTemplateEdits()
-
   return (
     <div className="space-y-6">
       <PageHeader
@@ -125,13 +121,10 @@ export function AdminSettingsPage() {
         </TabsList>
 
         <TabsContent value="confirmation" className="pt-5">
-          <ConfirmationTemplates
-            edits={edits}
-            applyEdit={applyEdit}
-          />
+          <ConfirmationTemplates />
         </TabsContent>
         <TabsContent value="email" className="pt-5">
-          <EmailTemplates edits={edits} applyEdit={applyEdit} />
+          <EmailTemplates />
         </TabsContent>
         <TabsContent value="codes" className="pt-5">
           <AccessCodeSettings />
@@ -156,37 +149,19 @@ function useTemplates() {
   })
 }
 
-/**
- * Templates are read-only in the mock API — there is no update endpoint yet,
- * so edits are held in local state and reset on reload. The same component
- * backs both template tabs so the presentation stays identical.
- */
-function useTemplateEdits() {
-  const [edits, setEdits] = React.useState<
-    Record<string, { subject: string | null; body: string }>
-  >({})
-
-  const applyEdit = React.useCallback(
-    (id: string, subject: string | null, body: string) => {
-      setEdits((previous) => ({ ...previous, [id]: { subject, body } }))
-    },
-    [],
-  )
-
-  return { edits, applyEdit }
-}
-
 function TemplateCard({
   template,
-  edited,
   onEdit,
+  onTest,
+  testing,
 }: {
   template: MessageTemplate
-  edited?: { subject: string | null; body: string }
   onEdit: (template: MessageTemplate) => void
+  onTest: (template: MessageTemplate) => void
+  testing: boolean
 }) {
-  const body = edited?.body ?? template.body
-  const subject = edited && 'subject' in edited ? edited.subject : template.subject
+  const body = template.body
+  const subject = template.subject
   const variables = Object.keys(template.variables)
 
   return (
@@ -215,11 +190,8 @@ function TemplateCard({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() =>
-              toast.success(
-                `Test ${channelLabels[template.channel].toLowerCase()} sent to your own address.`,
-              )
-            }
+            loading={testing}
+            onClick={() => onTest(template)}
           >
             <Send />
             Send test
@@ -264,15 +236,44 @@ function TemplateCard({
 function TemplatesPanel({
   templates,
   hint,
-  edits,
-  applyEdit,
 }: {
   templates: MessageTemplate[]
   hint: string
-  edits: Record<string, { subject: string | null; body: string }>
-  applyEdit: (id: string, subject: string | null, body: string) => void
 }) {
+  const queryClient = useQueryClient()
   const [editing, setEditing] = React.useState<MessageTemplate | null>(null)
+
+  const updateMutation = useMutation({
+    mutationFn: (input: {
+      id: string
+      subject: string | null
+      body: string
+    }) => adminApi.updateTemplate(input.id, input),
+    onSuccess: (updated) => {
+      void queryClient.invalidateQueries({ queryKey: ['templates'] })
+      toast.success(`${updated.key} updated.`)
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not update the template.',
+      )
+    },
+  })
+
+  const testMutation = useMutation({
+    mutationFn: (template: MessageTemplate) => adminApi.testTemplate(template.id),
+    onSuccess: (notification) => {
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+      toast.success(
+        `Test message queued for ${notification.recipient_contact ?? 'your account'}.`,
+      )
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not queue the test message.',
+      )
+    },
+  })
 
   if (templates.length === 0) {
     return (
@@ -291,8 +292,11 @@ function TemplatesPanel({
         <TemplateCard
           key={template.id}
           template={template}
-          edited={edits[template.id]}
           onEdit={setEditing}
+          onTest={testMutation.mutate}
+          testing={
+            testMutation.isPending && testMutation.variables?.id === template.id
+          }
         />
       ))}
 
@@ -300,10 +304,13 @@ function TemplatesPanel({
         <EditTemplateDialog
           key={editing.id}
           template={editing}
+          saving={updateMutation.isPending}
           onClose={() => setEditing(null)}
           onSave={(id, subject, body) => {
-            applyEdit(id, subject, body)
-            toast.success('Template updated.')
+            updateMutation.mutate(
+              { id, subject, body },
+              { onSuccess: () => setEditing(null) },
+            )
           }}
         />
       )}
@@ -311,13 +318,7 @@ function TemplatesPanel({
   )
 }
 
-function ConfirmationTemplates({
-  edits,
-  applyEdit,
-}: {
-  edits: Record<string, { subject: string | null; body: string }>
-  applyEdit: (id: string, subject: string | null, body: string) => void
-}) {
+function ConfirmationTemplates() {
   const templatesQuery = useTemplates()
   const templates = templatesQuery.data ?? []
   const confirmations = templates.filter((t) => t.key === CONFIRMATION_KEY)
@@ -349,8 +350,6 @@ function ConfirmationTemplates({
         <TemplatesPanel
           templates={confirmations}
           hint="The message sent to a candidate the moment they are shortlisted."
-          edits={edits}
-          applyEdit={applyEdit}
         />
       </section>
 
@@ -362,8 +361,6 @@ function ConfirmationTemplates({
           <TemplatesPanel
             templates={others}
             hint="Reusable confirmations for the remaining events — application receipt, access code issue and interview announcement."
-            edits={edits}
-            applyEdit={applyEdit}
           />
         </section>
       )}
@@ -371,13 +368,7 @@ function ConfirmationTemplates({
   )
 }
 
-function EmailTemplates({
-  edits,
-  applyEdit,
-}: {
-  edits: Record<string, { subject: string | null; body: string }>
-  applyEdit: (id: string, subject: string | null, body: string) => void
-}) {
+function EmailTemplates() {
   const templatesQuery = useTemplates()
   const templates = (templatesQuery.data ?? []).filter(
     (t) => t.channel === 'email' && t.key !== CONFIRMATION_KEY,
@@ -395,18 +386,18 @@ function EmailTemplates({
     <TemplatesPanel
       templates={templates}
       hint="Email templates for application receipt, access code issue, interview announcement and staff creation."
-      edits={edits}
-      applyEdit={applyEdit}
     />
   )
 }
 
 function EditTemplateDialog({
   template,
+  saving,
   onClose,
   onSave,
 }: {
   template: MessageTemplate
+  saving: boolean
   onClose: () => void
   onSave: (id: string, subject: string | null, body: string) => void
 }) {
@@ -459,6 +450,7 @@ function EditTemplateDialog({
           Cancel
         </Button>
         <Button
+          loading={saving}
           disabled={body.trim().length === 0}
           onClick={() => {
             onSave(
@@ -466,7 +458,6 @@ function EditTemplateDialog({
               subject.trim().length > 0 ? subject.trim() : null,
               body,
             )
-            onClose()
           }}
         >
           Save template
@@ -479,12 +470,65 @@ function EditTemplateDialog({
 /* -- Access code settings ------------------------------------------------ */
 
 function AccessCodeSettings() {
-  // Configured values. There is no settings API yet — these map to the
-  // `access_codes` settings in the settings table (README §9.5) and are held
-  // locally until that endpoint lands.
-  const [codeLength, setCodeLength] = React.useState(6)
-  const [ttlDays, setTtlDays] = React.useState(14)
-  const [maxAttempts, setMaxAttempts] = React.useState(3)
+  const queryClient = useQueryClient()
+  const settingsQuery = useQuery({
+    queryKey: ['access-code-settings'],
+    queryFn: () => adminApi.getAccessCodeSettings(),
+  })
+
+  const [codeLengthDraft, setCodeLengthDraft] = React.useState<number | null>(
+    null,
+  )
+  const [ttlDaysDraft, setTtlDaysDraft] = React.useState<number | null>(null)
+  const [maxAttemptsDraft, setMaxAttemptsDraft] = React.useState<number | null>(
+    null,
+  )
+
+  const codeLength =
+    codeLengthDraft ?? settingsQuery.data?.access_code_length ?? 6
+  const ttlDays = ttlDaysDraft ?? settingsQuery.data?.access_code_ttl_days ?? 14
+  const maxAttempts =
+    maxAttemptsDraft ?? settingsQuery.data?.access_code_max_attempts ?? 3
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      adminApi.updateAccessCodeSettings({
+        access_code_length: codeLength,
+        access_code_ttl_days: ttlDays,
+        access_code_max_attempts: maxAttempts,
+      }),
+    onSuccess: (settings) => {
+      queryClient.setQueryData(['access-code-settings'], settings)
+      toast.success('Access code settings saved.')
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not save the settings.',
+      )
+    },
+  })
+
+  if (settingsQuery.isLoading) {
+    return (
+      <div className="rounded-xl border border-ink-200 bg-white shadow-xs">
+        <TableSkeleton rows={4} />
+      </div>
+    )
+  }
+
+  if (settingsQuery.isError) {
+    return (
+      <EmptyState
+        icon={KeyRound}
+        title="Settings could not be loaded"
+        description={
+          settingsQuery.error instanceof Error
+            ? settingsQuery.error.message
+            : 'Try again in a moment.'
+        }
+      />
+    )
+  }
 
   return (
     <Card>
@@ -494,8 +538,8 @@ function AccessCodeSettings() {
           Access code settings
         </CardTitle>
         <p className="mt-1 text-sm text-ink-500">
-          These are the currently configured values. Saving records the new
-          values for the Go API to pick up.
+          These values are stored in the group settings and used immediately
+          when the next access code is issued.
         </p>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -511,7 +555,7 @@ function AccessCodeSettings() {
               min={4}
               max={12}
               value={codeLength}
-              onChange={(e) => setCodeLength(Number(e.target.value))}
+              onChange={(e) => setCodeLengthDraft(Number(e.target.value))}
             />
           </Field>
           <Field
@@ -525,7 +569,7 @@ function AccessCodeSettings() {
               min={1}
               max={90}
               value={ttlDays}
-              onChange={(e) => setTtlDays(Number(e.target.value))}
+              onChange={(e) => setTtlDaysDraft(Number(e.target.value))}
             />
           </Field>
           <Field
@@ -539,7 +583,7 @@ function AccessCodeSettings() {
               min={1}
               max={10}
               value={maxAttempts}
-              onChange={(e) => setMaxAttempts(Number(e.target.value))}
+              onChange={(e) => setMaxAttemptsDraft(Number(e.target.value))}
             />
           </Field>
         </div>
@@ -558,15 +602,17 @@ function AccessCodeSettings() {
 
         <div className="flex items-center gap-3">
           <Button
-            onClick={() =>
-              toast.success('Access code settings saved.')
-            }
+            loading={saveMutation.isPending}
+            onClick={() => saveMutation.mutate()}
           >
             Save
           </Button>
           <p className="text-xs text-ink-500">
-            Maps to the <span className="font-mono">access_codes</span> rows in
-            the settings table.
+            Last saved{' '}
+            {settingsQuery.data?.updated_at
+              ? formatDateTime(settingsQuery.data.updated_at)
+              : 'at first setup'}
+            .
           </p>
         </div>
       </CardContent>
@@ -582,19 +628,28 @@ function UsersAndAdmins() {
     queryKey: ['users'],
     queryFn: () => adminApi.listUsers(),
   })
+  const [inviteOpen, setInviteOpen] = React.useState(false)
+  const [resetUser, setResetUser] = React.useState<User | null>(null)
 
-  const approveMutation = useMutation({
-    mutationFn: (id: string) => adminApi.approveUser(id),
+  const statusMutation = useMutation({
+    mutationFn: (input: {
+      id: string
+      status: 'active' | 'suspended' | 'disabled'
+    }) => adminApi.updateUserStatus(input.id, input.status),
     onSuccess: (updated) => {
       queryClient.setQueryData<User[]>(['users'], (old) =>
         (old ?? []).map((u) => (u.id === updated.id ? updated : u)),
       )
       void queryClient.invalidateQueries({ queryKey: ['users'] })
-      toast.success(`${fullName(updated.first_name, updated.last_name)} approved.`)
+      toast.success(
+        `${fullName(updated.first_name, updated.last_name)} ${
+          updated.status === 'active' ? 'reactivated' : 'suspended'
+        }.`,
+      )
     },
     onError: (error: unknown) => {
       toast.error(
-        error instanceof Error ? error.message : 'Could not approve the account.',
+        error instanceof Error ? error.message : 'Could not update the account.',
       )
     },
   })
@@ -667,34 +722,60 @@ function UsersAndAdmins() {
                           size="sm"
                           variant="success"
                           loading={
-                            approveMutation.isPending &&
-                            approveMutation.variables === user.id
+                            statusMutation.isPending &&
+                            statusMutation.variables?.id === user.id
                           }
-                          onClick={() => approveMutation.mutate(user.id)}
+                          onClick={() =>
+                            statusMutation.mutate({
+                              id: user.id,
+                              status: 'active',
+                            })
+                          }
                         >
                           <UserCheck />
                           Approve
                         </Button>
                       )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          toast.info(
-                            `Suspending ${fullName(user.first_name, user.last_name)} is not available yet.`,
-                          )
-                        }
-                      >
-                        Suspend
-                      </Button>
+                      {user.status === 'active' ? (
+                        <Button
+                          size="sm"
+                          variant="danger-outline"
+                          loading={
+                            statusMutation.isPending &&
+                            statusMutation.variables?.id === user.id
+                          }
+                          onClick={() =>
+                            statusMutation.mutate({
+                              id: user.id,
+                              status: 'suspended',
+                            })
+                          }
+                        >
+                          Suspend
+                        </Button>
+                      ) : user.status !== 'pending' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          loading={
+                            statusMutation.isPending &&
+                            statusMutation.variables?.id === user.id
+                          }
+                          onClick={() =>
+                            statusMutation.mutate({
+                              id: user.id,
+                              status: 'active',
+                            })
+                          }
+                        >
+                          <UserCheck />
+                          Reactivate
+                        </Button>
+                      ) : null}
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() =>
-                          toast.success(
-                            'A password reset link has been sent to the account holder.',
-                          )
-                        }
+                        onClick={() => setResetUser(user)}
                       >
                         Reset password
                       </Button>
@@ -707,18 +788,228 @@ function UsersAndAdmins() {
         )}
       </div>
 
-      <Button
-        variant="outline"
-        onClick={() =>
-          toast.info(
-            'Admin accounts are created by the Super Admin — ask them to create one for you.',
-          )
-        }
-      >
+      <Button variant="outline" onClick={() => setInviteOpen(true)}>
         <UserPlus />
         Invite an admin
       </Button>
+
+      {inviteOpen && (
+        <InviteAdminDialog
+          onClose={() => setInviteOpen(false)}
+          onCreated={(user) => {
+            queryClient.setQueryData<User[]>(['users'], (old) => [
+              user,
+              ...(old ?? []),
+            ])
+            void queryClient.invalidateQueries({ queryKey: ['users'] })
+            setInviteOpen(false)
+          }}
+        />
+      )}
+
+      {resetUser && (
+        <ResetPasswordDialog
+          user={resetUser}
+          onClose={() => setResetUser(null)}
+          onSaved={() => {
+            toast.success(
+              `Password reset for ${fullName(resetUser.first_name, resetUser.last_name)}.`,
+            )
+            setResetUser(null)
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+function InviteAdminDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void
+  onCreated: (user: User) => void
+}) {
+  const [firstName, setFirstName] = React.useState('')
+  const [lastName, setLastName] = React.useState('')
+  const [email, setEmail] = React.useState('')
+  const [password, setPassword] = React.useState('')
+  const [role, setRole] = React.useState<'admin' | 'staff'>('admin')
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      adminApi.createAdminUser({
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        email: email.trim(),
+        password,
+        role,
+      }),
+    onSuccess: onCreated,
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not create the account.',
+      )
+    },
+  })
+
+  const valid =
+    firstName.trim().length > 0 &&
+    lastName.trim().length > 0 &&
+    email.trim().length > 0 &&
+    password.length >= 8
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogHeader>
+        <div>
+          <DialogTitle>Invite an account</DialogTitle>
+          <DialogDescription>
+            Creates the login immediately. The new account stays pending until
+            a Super Admin approves it.
+          </DialogDescription>
+        </div>
+        <DialogClose onClick={onClose} />
+      </DialogHeader>
+      <DialogBody className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="First name" htmlFor="invite-first-name" required>
+            <Input
+              id="invite-first-name"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+            />
+          </Field>
+          <Field label="Last name" htmlFor="invite-last-name" required>
+            <Input
+              id="invite-last-name"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+            />
+          </Field>
+        </div>
+        <Field label="Email" htmlFor="invite-email" required>
+          <Input
+            id="invite-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Role" htmlFor="invite-role" required>
+            <Select
+              id="invite-role"
+              value={role}
+              onChange={(e) => setRole(e.target.value as 'admin' | 'staff')}
+            >
+              <option value="admin">Admin</option>
+              <option value="staff">Staff</option>
+            </Select>
+          </Field>
+          <Field
+            label="Initial password"
+            htmlFor="invite-password"
+            required
+            hint="At least 8 characters. Share it securely."
+          >
+            <Input
+              id="invite-password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </Field>
+        </div>
+      </DialogBody>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          loading={createMutation.isPending}
+          disabled={!valid}
+          onClick={() => createMutation.mutate()}
+        >
+          Create account
+        </Button>
+      </DialogFooter>
+    </Dialog>
+  )
+}
+
+function ResetPasswordDialog({
+  user,
+  onClose,
+  onSaved,
+}: {
+  user: User
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [password, setPassword] = React.useState('')
+  const [confirmation, setConfirmation] = React.useState('')
+
+  const resetMutation = useMutation({
+    mutationFn: () => adminApi.resetUserPassword(user.id, password),
+    onSuccess: onSaved,
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not reset the password.',
+      )
+    },
+  })
+
+  const valid = password.length >= 8 && password === confirmation
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogHeader>
+        <div>
+          <DialogTitle>Reset password</DialogTitle>
+          <DialogDescription>
+            Set a new password for {fullName(user.first_name, user.last_name)}{' '}
+            ({user.email}) and share it securely.
+          </DialogDescription>
+        </div>
+        <DialogClose onClick={onClose} />
+      </DialogHeader>
+      <DialogBody className="space-y-4">
+        <Field
+          label="New password"
+          htmlFor="reset-password"
+          required
+          hint="At least 8 characters."
+        >
+          <Input
+            id="reset-password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </Field>
+        <Field label="Confirm password" htmlFor="reset-confirm" required>
+          <Input
+            id="reset-confirm"
+            type="password"
+            value={confirmation}
+            onChange={(e) => setConfirmation(e.target.value)}
+          />
+        </Field>
+      </DialogBody>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          loading={resetMutation.isPending}
+          disabled={!valid}
+          onClick={() => resetMutation.mutate()}
+        >
+          Reset password
+        </Button>
+      </DialogFooter>
+    </Dialog>
   )
 }
 

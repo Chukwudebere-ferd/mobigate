@@ -60,6 +60,7 @@ func run() error {
 	handler := &httpapi.Handler{
 		Store:          st,
 		AllowedOrigins: cfg.AllowedOrigins,
+		AuthBaseURL:    cfg.AuthBaseURL,
 		Verifier: &auth.Verifier{
 			BaseURL:  cfg.AuthBaseURL,
 			CacheTTL: 60 * time.Second,

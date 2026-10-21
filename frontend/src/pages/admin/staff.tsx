@@ -7,7 +7,7 @@
  * visible to the record owner and administrators only (README M10, §3.1).
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Briefcase,
   Contact,
@@ -22,7 +22,6 @@ import {
   MapPin,
   Phone,
   Search,
-  ShieldCheck,
   UserPlus,
   Users,
 } from 'lucide-react'
@@ -89,6 +88,7 @@ function downloadCsv(filename: string, rows: string[][]) {
 }
 
 export function AdminStaffPage() {
+  const queryClient = useQueryClient()
   const [searchInput, setSearchInput] = React.useState('')
   const [search, setSearch] = React.useState('')
   const [status, setStatus] = React.useState<StaffStatus | 'all'>('all')
@@ -367,56 +367,223 @@ export function AdminStaffPage() {
 
       <StaffRecordDialog staffId={selectedId} onClose={() => setSelectedId(null)} />
 
-      <Dialog open={manualOpen} onOpenChange={setManualOpen}>
-        <DialogHeader>
-          <div className="min-w-0">
-            <DialogTitle>Add staff manually</DialogTitle>
-            <DialogDescription>
-              Manual entry is for staff appointed outside the portal.
-            </DialogDescription>
-          </div>
-          <DialogClose onClick={() => setManualOpen(false)} />
-        </DialogHeader>
-        <DialogBody className="space-y-4">
-          <p className="text-sm text-ink-600">
-            Staff who came through the portal already have a record: appoint
-            them from the Applications screen and the staff profile, Staff ID
-            and access code are created for you.
-          </p>
-          <p className="text-sm text-ink-600">
-            Use manual entry only for people appointed outside the process —
-            transfers, contractors brought in directly, or senior appointments
-            made by the board. The record still needs a Staff ID, a department
-            and an appointment date.
-          </p>
-          <div className="rounded-lg border border-info-500/30 bg-info-50 p-3">
-            <p className="flex items-center gap-2 text-sm font-medium text-info-900">
-              <ShieldCheck className="size-4" aria-hidden />
-              Recorded for audit
-            </p>
-            <p className="mt-1 text-xs text-info-900/80">
-              Manual entries are attributed to the Admin who made them and
-              appear in the audit log alongside every other staff record.
-            </p>
-          </div>
-        </DialogBody>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setManualOpen(false)}>
-            Close
-          </Button>
-          <Button
-            onClick={() => {
-              setManualOpen(false)
-              toast.info(
-                'Manual staff entry is not enabled yet — appoint the candidate from the Applications screen in the meantime.',
-              )
-            }}
-          >
-            Request manual entry
-          </Button>
-        </DialogFooter>
-      </Dialog>
+      {manualOpen && (
+        <ManualStaffDialog
+          onClose={() => setManualOpen(false)}
+          onCreated={(staff) => {
+            setManualOpen(false)
+            void queryClient.invalidateQueries({ queryKey: ['staff'] })
+            toast.success(
+              `${fullName(staff.first_name, staff.last_name)} added as ${staff.staff_id}.`,
+            )
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/* -- Manual staff entry -------------------------------------------------- */
+
+function ManualStaffDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void
+  onCreated: (staff: StaffProfile) => void
+}) {
+  const [firstName, setFirstName] = React.useState('')
+  const [lastName, setLastName] = React.useState('')
+  const [email, setEmail] = React.useState('')
+  const [phone, setPhone] = React.useState('')
+  const [category, setCategory] =
+    React.useState<EmploymentCategory>('employee')
+  const [departmentId, setDepartmentId] = React.useState('')
+  const [locationId, setLocationId] = React.useState('')
+  const [position, setPosition] = React.useState('')
+  const [appointmentDate, setAppointmentDate] = React.useState('')
+
+  const departmentsQuery = useQuery({
+    queryKey: ['departments'],
+    queryFn: () => adminApi.listDepartments(),
+  })
+  const locationsQuery = useQuery({
+    queryKey: ['locations'],
+    queryFn: () => adminApi.listLocations(),
+  })
+
+  const createMutation = useMutation({
+    mutationFn: () =>
+      adminApi.createStaff({
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        employment_category: category,
+        department_id: departmentId || undefined,
+        location_id: locationId || undefined,
+        position: position.trim() || undefined,
+        appointment_date: appointmentDate || undefined,
+      }),
+    onSuccess: onCreated,
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not create the staff record.',
+      )
+    },
+  })
+
+  const valid =
+    firstName.trim().length > 0 &&
+    lastName.trim().length > 0 &&
+    email.trim().length > 0 &&
+    phone.trim().length > 0
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogHeader>
+        <div className="min-w-0">
+          <DialogTitle>Add staff manually</DialogTitle>
+          <DialogDescription>
+            For appointments made outside the portal. A Staff ID is allocated
+            when you save.
+          </DialogDescription>
+        </div>
+        <DialogClose onClick={onClose} />
+      </DialogHeader>
+      <form
+        id="manual-staff-form"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (valid) createMutation.mutate()
+        }}
+      >
+        <DialogBody className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="First name" htmlFor="manual-first-name" required>
+              <Input
+                id="manual-first-name"
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+              />
+            </Field>
+            <Field label="Last name" htmlFor="manual-last-name" required>
+              <Input
+                id="manual-last-name"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Email" htmlFor="manual-email" required>
+              <Input
+                id="manual-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </Field>
+            <Field label="Phone" htmlFor="manual-phone" required>
+              <Input
+                id="manual-phone"
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field
+              label="Employment category"
+              htmlFor="manual-category"
+              required
+            >
+              <Select
+                id="manual-category"
+                value={category}
+                onChange={(e) =>
+                  setCategory(e.target.value as EmploymentCategory)
+                }
+              >
+                {Object.entries(employmentCategoryLabels).map(
+                  ([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ),
+                )}
+              </Select>
+            </Field>
+            <Field label="Department" htmlFor="manual-department">
+              <Select
+                id="manual-department"
+                value={departmentId}
+                onChange={(e) => setDepartmentId(e.target.value)}
+              >
+                <option value="">No department</option>
+                {(departmentsQuery.data ?? []).map((department) => (
+                  <option key={department.id} value={department.id}>
+                    {department.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Location" htmlFor="manual-location">
+              <Select
+                id="manual-location"
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+              >
+                <option value="">No location</option>
+                {(locationsQuery.data ?? [])
+                  .filter((location) => location.status === 'approved')
+                  .map((location) => (
+                    <option key={location.id} value={location.id}>
+                      {location.name}
+                    </option>
+                  ))}
+              </Select>
+            </Field>
+            <Field label="Position" htmlFor="manual-position">
+              <Input
+                id="manual-position"
+                value={position}
+                onChange={(e) => setPosition(e.target.value)}
+              />
+            </Field>
+          </div>
+          <Field
+            label="Appointment date"
+            htmlFor="manual-appointment"
+            hint="Optional; defaults to no recorded appointment date."
+          >
+            <Input
+              id="manual-appointment"
+              type="date"
+              value={appointmentDate}
+              onChange={(e) => setAppointmentDate(e.target.value)}
+            />
+          </Field>
+        </DialogBody>
+      </form>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          form="manual-staff-form"
+          loading={createMutation.isPending}
+          disabled={!valid}
+        >
+          <UserPlus />
+          Create staff record
+        </Button>
+      </DialogFooter>
+    </Dialog>
   )
 }
 

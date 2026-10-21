@@ -19,6 +19,12 @@ var (
 
 	// ErrConflict is returned on a unique constraint violation.
 	ErrConflict = errors.New("record conflict")
+
+	// ErrInvalidTransition is returned when a status change is not allowed.
+	ErrInvalidTransition = errors.New("invalid status transition")
+
+	// ErrValidation is returned when cross-field business rules fail.
+	ErrValidation = errors.New("validation failed")
 )
 
 // Store wraps the connection pool.

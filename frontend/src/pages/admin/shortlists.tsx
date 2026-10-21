@@ -142,7 +142,7 @@ export function AdminShortlistsPage() {
   const revokeMutation = useMutation({
     mutationFn: (id: string) => adminApi.revokeShortlist(id),
     onSuccess: () => {
-      toast.success('Shortlist revoked — the candidate will be notified')
+      toast.success('Shortlist revoked')
       queryClient.invalidateQueries({ queryKey: ['shortlists'] })
       queryClient.invalidateQueries({ queryKey: ['applications'] })
     },
@@ -152,20 +152,22 @@ export function AdminShortlistsPage() {
   })
 
   const resendMutation = useMutation({
-    // The message is stored verbatim at shortlist time; a resend re-delivers
-    // the stored text, it never edits it.
-    mutationFn: async (shortlist: Shortlist) => {
-      await new Promise((resolve) => setTimeout(resolve, 300))
-      return shortlist
-    },
-    onSuccess: (shortlist) => {
+    // The message is stored verbatim at shortlist time; a resend queues a
+    // fresh delivery of that text, it never edits it.
+    mutationFn: (shortlist: Shortlist) => adminApi.resendShortlist(shortlist.id),
+    onSuccess: (notification) => {
       toast.success(
-        `Message resent to ${shortlist.applicant_name ?? 'the candidate'}`,
+        `Message queued for ${notification.recipient_contact ?? 'the candidate'}.`,
       )
       queryClient.invalidateQueries({ queryKey: ['shortlists'] })
+      queryClient.invalidateQueries({ queryKey: ['notifications'] })
     },
-    onError: () => {
-      toast.error('Could not resend the message. Please try again.')
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Could not queue the message. Please try again.',
+      )
     },
   })
 
@@ -405,8 +407,8 @@ function RevokeDialog({
       <DialogHeader>
         <DialogTitle>Revoke this shortlist?</DialogTitle>
         <DialogDescription>
-          {shortlist?.applicant_name ?? 'This candidate'} will be notified that
-          the shortlist has been withdrawn.
+          The shortlist for {shortlist?.applicant_name ?? 'this candidate'} will
+          be withdrawn immediately.
         </DialogDescription>
       </DialogHeader>
 

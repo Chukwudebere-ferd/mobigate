@@ -99,11 +99,8 @@ function placeholdersIn(body: string): string[] {
   return Array.from(new Set(matches))
 }
 
-/**
- * The mock API has no document endpoint, so the CV action downloads a plain
- * text summary of the record instead of the binary file.
- */
-function downloadCvSummary(application: Application) {
+/** Download a plain-text record summary for the selected application. */
+function downloadApplicationSummary(application: Application) {
   const summary = [
     `Applicant: ${application.first_name} ${application.last_name}`,
     `Application number: ${application.application_number}`,
@@ -115,11 +112,12 @@ function downloadCvSummary(application: Application) {
     `Status: ${application.status}`,
     `Submitted: ${formatDateTime(application.submitted_at)}`,
   ].join('\n')
-  const name =
-    application.cv_file_name?.replace(/\.pdf$/i, '') ??
-    `${application.first_name}_${application.last_name}_CV`
-  downloadFile(`${name}.txt`, summary, 'text/plain;charset=utf-8')
-  toast.success('CV summary downloaded.')
+  downloadFile(
+    `${application.application_number.replaceAll('/', '-')}_summary.txt`,
+    summary,
+    'text/plain;charset=utf-8',
+  )
+  toast.success('Application summary downloaded.')
 }
 
 /* ------------------------------------------------------------- components */
@@ -693,10 +691,10 @@ function ApplicationDrawer({
           <Button
             type="button"
             variant="outline"
-            onClick={() => downloadCvSummary(current)}
+            onClick={() => downloadApplicationSummary(current)}
           >
             <Download />
-            Download CV
+            Download summary
           </Button>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -1298,8 +1296,8 @@ export function AdminApplicationsPage() {
                           type="button"
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={`Download CV for ${application.first_name} ${application.last_name}`}
-                          onClick={() => downloadCvSummary(application)}
+                          aria-label={`Download application summary for ${application.first_name} ${application.last_name}`}
+                          onClick={() => downloadApplicationSummary(application)}
                         >
                           <Download />
                         </Button>

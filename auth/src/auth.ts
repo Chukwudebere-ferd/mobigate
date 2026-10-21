@@ -10,6 +10,7 @@
 import './env.js'
 import { betterAuth } from 'better-auth'
 import { admin as adminPlugin } from 'better-auth/plugins'
+import { adminAc, userAc } from 'better-auth/plugins/admin/access'
 import { Pool } from 'pg'
 
 const pool = new Pool({
@@ -70,7 +71,22 @@ export const auth = betterAuth({
     },
   },
 
-  plugins: [adminPlugin()],
+  // Better Auth's admin plugin gates identity writes (create user, reset
+  // password). MGM's own roles are super_admin/admin, so both must be
+  // recognised as administrative roles here as well.
+  plugins: [
+    adminPlugin({
+      defaultRole: 'applicant',
+      adminRoles: ['super_admin', 'admin'],
+      roles: {
+        super_admin: adminAc,
+        admin: adminAc,
+        staff: userAc,
+        applicant: userAc,
+        user: userAc,
+      },
+    }),
+  ],
 
   advanced: {
     // Better Auth's own tables live in the same database as the domain

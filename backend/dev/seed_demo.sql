@@ -31,6 +31,17 @@ SELECT
 FROM generate_series(1, 24) AS n
 ON CONFLICT (id) DO NOTHING;
 
+-- A pending admin so the approval flow has something to act on.
+INSERT INTO users (
+    id, tenant_id, role, email, first_name, last_name, status, email_verified_at
+)
+VALUES (
+    '40000000-0000-0000-0000-000000000099',
+    '20000000-0000-0000-0000-000000000001',
+    'admin', 'demo.admin@example.test', 'Demo', 'Admin', 'pending', now()
+)
+ON CONFLICT (id) DO NOTHING;
+
 -- Six roles: four published, one closed, one draft.
 INSERT INTO jobs (
     id, tenant_id, title, slug, description, requirements, location_id,
@@ -253,6 +264,77 @@ VALUES
      'job_applicants', 'draft',
      (SELECT id FROM users WHERE role = 'super_admin' ORDER BY created_at LIMIT 1))
 ON CONFLICT (id) DO NOTHING;
+
+-- Give two demo codes an application so the list shows applicant context.
+UPDATE access_codes c
+SET application_id = '60000000-0000-0000-0000-000000000005',
+    issued_to = (SELECT applicant_id FROM applications WHERE id = '60000000-0000-0000-0000-000000000005')
+WHERE c.id = '80000000-0000-0000-0000-000000000001'
+  AND c.application_id IS NULL;
+
+UPDATE access_codes c
+SET application_id = '60000000-0000-0000-0000-000000000007',
+    issued_to = (SELECT applicant_id FROM applications WHERE id = '60000000-0000-0000-0000-000000000007')
+WHERE c.id = '80000000-0000-0000-0000-000000000003'
+  AND c.application_id IS NULL;
+
+-- Notification delivery log for the settings page.
+INSERT INTO notifications (
+    id, tenant_id, recipient_user_id, recipient_contact, channel,
+    template_key, payload, status, error, sent_at, created_at
+)
+VALUES
+    ('d0000000-0000-0000-0000-000000000001',
+     '20000000-0000-0000-0000-000000000001',
+     '40000000-0000-0000-0000-000000000001',
+     'demo.applicant1@example.test', 'email', 'shortlist_confirmation',
+     '{"first_name":"Ngozi","job_title":"Senior Backend Engineer"}'::jsonb,
+     'sent', NULL, now() - interval '2 hours', now() - interval '2 hours'),
+    ('d0000000-0000-0000-0000-000000000002',
+     '20000000-0000-0000-0000-000000000001',
+     '40000000-0000-0000-0000-000000000005',
+     'demo.applicant5@example.test', 'email', 'interview_announcement',
+     '{"first_name":"Aisha","job_title":"People Operations Partner"}'::jsonb,
+     'pending', NULL, NULL, now() - interval '6 hours'),
+    ('d0000000-0000-0000-0000-000000000003',
+     '20000000-0000-0000-0000-000000000001',
+     '40000000-0000-0000-0000-000000000007',
+     '+2348030000007', 'sms', 'application_rejected',
+     '{"first_name":"Zainab","job_title":"Finance Analyst"}'::jsonb,
+     'failed', 'Gateway rejected the destination number',
+     NULL, now() - interval '1 day'),
+    ('d0000000-0000-0000-0000-000000000004',
+     '20000000-0000-0000-0000-000000000001',
+     '40000000-0000-0000-0000-000000000012',
+     'demo.applicant12@example.test', 'email', 'shortlist_confirmation',
+     '{"first_name":"Yusuf","job_title":"Operations Coordinator"}'::jsonb,
+     'read', NULL, now() - interval '3 days', now() - interval '3 days')
+ON CONFLICT (id) DO NOTHING;
+
+-- Message templates used by the shortlist and interview flows.
+INSERT INTO message_templates (
+    id, tenant_id, key, channel, subject, body, variables
+)
+VALUES
+    ('c0000000-0000-0000-0000-000000000001',
+     '20000000-0000-0000-0000-000000000001',
+     'shortlist_confirmation', 'email',
+     'You have been shortlisted for {{job_title}}',
+     'Dear {{first_name}}, you have been shortlisted for the {{job_title}} role. We will contact you with interview details shortly.',
+     '{"first_name":"Applicant first name","job_title":"Role title"}'::jsonb),
+    ('c0000000-0000-0000-0000-000000000002',
+     '20000000-0000-0000-0000-000000000001',
+     'interview_announcement', 'email',
+     'Interview invitation: {{job_title}}',
+     'Dear {{first_name}}, you are invited to interview for {{job_title}} on {{interview_date}} at {{venue}}.',
+     '{"first_name":"Applicant first name","job_title":"Role title","interview_date":"Date and time","venue":"Venue"}'::jsonb),
+    ('c0000000-0000-0000-0000-000000000003',
+     '20000000-0000-0000-0000-000000000001',
+     'application_rejected', 'email',
+     'Update on your application for {{job_title}}',
+     'Dear {{first_name}}, thank you for applying for {{job_title}}. We will not be progressing your application at this time.',
+     '{"first_name":"Applicant first name","job_title":"Role title"}'::jsonb)
+ON CONFLICT (tenant_id, key, channel) DO NOTHING;
 
 -- Audit entries for the recent-activity panel.
 INSERT INTO audit_logs (

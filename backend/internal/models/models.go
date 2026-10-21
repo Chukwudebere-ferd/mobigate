@@ -171,6 +171,10 @@ type Job struct {
 	Status             JobStatus           `json:"status"`
 	CreatedBy          *uuid.UUID          `json:"created_by"`
 	CreatedAt          time.Time           `json:"created_at"`
+
+	// Derived for list display; not columns on jobs.
+	ApplicationsCount *int    `json:"applications_count,omitempty"`
+	LocationName      *string `json:"location_name,omitempty"`
 }
 
 type Application struct {
@@ -196,7 +200,9 @@ type Application struct {
 
 	// Derived for list display; not columns on applications.
 	JobTitle     *string `json:"job_title,omitempty"`
+	JobSlug      *string `json:"job_slug,omitempty"`
 	LocationName *string `json:"location_name,omitempty"`
+	CVFileName   *string `json:"cv_file_name,omitempty"`
 }
 
 type ApplicationEvent struct {
@@ -207,6 +213,9 @@ type ApplicationEvent struct {
 	ToStatus      string     `json:"to_status"`
 	Reason        *string    `json:"reason"`
 	CreatedAt     time.Time  `json:"created_at"`
+
+	// Derived for the application timeline; not a column on application_events.
+	ActorName *string `json:"actor_name,omitempty"`
 }
 
 type InterviewAnnouncement struct {
@@ -236,6 +245,10 @@ type Shortlist struct {
 	CreatedBy         *uuid.UUID `json:"created_by"`
 	CreatedAt         time.Time  `json:"created_at"`
 	RevokedAt         *time.Time `json:"revoked_at"`
+
+	// Derived for list display; not columns on shortlists.
+	ApplicantName *string `json:"applicant_name,omitempty"`
+	JobTitle      *string `json:"job_title,omitempty"`
 }
 
 type AccessCode struct {
@@ -253,6 +266,10 @@ type AccessCode struct {
 	UsedBy         *uuid.UUID       `json:"used_by"`
 	FailedAttempts int              `json:"failed_attempts"`
 	CreatedAt      time.Time        `json:"created_at"`
+
+	// Derived for list display; not columns on access_codes.
+	ApplicantName *string `json:"applicant_name,omitempty"`
+	JobTitle      *string `json:"job_title,omitempty"`
 }
 
 type StaffProfile struct {
@@ -287,6 +304,10 @@ type StaffProfile struct {
 	Status                      StaffStatus        `json:"status"`
 	CreatedAt                   time.Time          `json:"created_at"`
 	UpdatedAt                   time.Time          `json:"updated_at"`
+
+	// Derived for list display; not columns on staff_profiles.
+	LocationName   *string `json:"location_name,omitempty"`
+	DepartmentName *string `json:"department_name,omitempty"`
 }
 
 type Department struct {
@@ -307,6 +328,15 @@ type Document struct {
 	SizeBytes  int64      `json:"size_bytes"`
 	UploadedBy *uuid.UUID `json:"uploaded_by"`
 	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// AdminSettings is the single group-wide configuration row.
+type AdminSettings struct {
+	AccessCodeLength      int        `json:"access_code_length"`
+	AccessCodeTTLDays     int        `json:"access_code_ttl_days"`
+	AccessCodeMaxAttempts int        `json:"access_code_max_attempts"`
+	UpdatedAt             time.Time  `json:"updated_at"`
+	UpdatedBy             *uuid.UUID `json:"updated_by"`
 }
 
 type MessageTemplate struct {

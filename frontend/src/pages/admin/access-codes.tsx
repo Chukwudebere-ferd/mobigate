@@ -66,23 +66,10 @@ const TYPE_OPTIONS: { value: AccessCodeType | 'all'; label: string }[] = [
   { value: 'staff', label: 'Staff' },
 ]
 
-const EXPIRY_OPTIONS: { value: number; label: string }[] = [
-  { value: 7, label: '7 days' },
-  { value: 14, label: '14 days' },
-  { value: 30, label: '30 days' },
-]
-
 function daysUntil(iso: string): number {
   const target = new Date(iso).getTime()
   if (Number.isNaN(target)) return Number.POSITIVE_INFINITY
   return (target - Date.now()) / 86_400_000
-}
-
-function expiresIn(days: number): string {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  date.setHours(23, 59, 0, 0)
-  return date.toISOString()
 }
 
 function isAccessCodeStatus(value: string | null): value is AccessCodeStatus {
@@ -479,9 +466,14 @@ function IssueAccessCodeDialog({
 
   const [applicationId, setApplicationId] = React.useState('')
   const [codeType, setCodeType] = React.useState<AccessCodeType>('staff')
-  const [expiryDays, setExpiryDays] = React.useState(7)
   const [issuedCode, setIssuedCode] = React.useState<string | null>(null)
   const [copied, setCopied] = React.useState(false)
+
+  const settingsQuery = useQuery({
+    queryKey: ['access-code-settings'],
+    queryFn: () => adminApi.getAccessCodeSettings(),
+    enabled: open,
+  })
 
   const applicationsQuery = useQuery({
     queryKey: ['applications', 'issuable'],
@@ -501,7 +493,6 @@ function IssueAccessCodeDialog({
     mutationFn: (payload: {
       application_id: string
       type: AccessCodeType
-      expires_at: string
     }) => adminApi.issueAccessCode(payload),
     onSuccess: (result) => {
       // The plaintext code is returned exactly once. It is captured here and
@@ -519,7 +510,6 @@ function IssueAccessCodeDialog({
   const reset = () => {
     setApplicationId('')
     setCodeType('staff')
-    setExpiryDays(7)
     setIssuedCode(null)
     setCopied(false)
   }
@@ -620,7 +610,6 @@ function IssueAccessCodeDialog({
             issueMutation.mutate({
               application_id: applicationId,
               type: codeType,
-              expires_at: expiresIn(expiryDays),
             })
           }}
         >
@@ -663,23 +652,13 @@ function IssueAccessCodeDialog({
                 </Select>
               </Field>
 
-              <Field
-                label="Expires after"
-                htmlFor="access-code-expiry"
-                hint="The code stops working at the end of this period."
-              >
-                <Select
-                  id="access-code-expiry"
-                  value={String(expiryDays)}
-                  onChange={(e) => setExpiryDays(Number(e.target.value))}
-                >
-                  {EXPIRY_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+              <div className="flex items-end rounded-lg border border-ink-200 bg-ink-50/70 px-3 py-2.5 text-xs text-ink-600">
+                Expires after{' '}
+                <span className="mx-1 font-semibold text-ink-800">
+                  {settingsQuery.data?.access_code_ttl_days ?? 14} days
+                </span>{' '}
+                per Settings.
+              </div>
             </div>
 
             <p className="flex items-start gap-2 rounded-lg bg-info-50 px-3 py-2.5 text-xs text-info-900 ring-1 ring-info-100">

@@ -18,6 +18,9 @@ schema are in place; the persistence layer and handler bodies land next.
 | `internal/store` | Database access layer |
 | `internal/httpapi` | HTTP handlers — the route contract |
 | `migrations/0001_init.sql` | Full schema |
+| `migrations/0002_seed.sql` | Reference tenants, locations and templates |
+| `migrations/0003_better_auth.sql` | Better Auth identity tables |
+| `migrations/0004_admin_settings.sql` | Group-wide access-code settings |
 
 ## Running
 
@@ -25,7 +28,7 @@ Requires Go 1.21+ and PostgreSQL 15+.
 
 ```bash
 createdb mgm
-psql mgm -f migrations/0001_init.sql
+for file in migrations/*.sql; do psql mgm -f "$file"; done
 
 export DATABASE_URL="postgres://postgres:postgres@localhost:5432/mgm?sslmode=disable"
 go run ./cmd/mgm-api

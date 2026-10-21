@@ -5,8 +5,7 @@
  * implementations resolve from the seed data with realistic latency; in live
  * mode they hit the Go server over HTTP. Pages never know the difference.
  *
- * Endpoint paths are proposed here and are expected to be adjusted when the
- * Go API contract is finalised.
+ * Admin paths below match the Go API route contract in `internal/httpapi`.
  */
 
 import { http } from './client'
@@ -29,6 +28,7 @@ import {
 import type {
   AccessCode,
   AccessCodeFilters,
+  AdminSettings,
   Application,
   ApplicationEvent,
   ApplicationFilters,
@@ -54,10 +54,16 @@ import type {
 
 const API_MODE = import.meta.env.VITE_API_MODE ?? 'mock'
 
-// The dashboard is migrated first. This lets its live queries run while the
-// remaining admin pages stay on the mock layer until their endpoints land.
+// Admin domains can be switched independently from the public/applicant
+// surface while those pages are still being migrated.
 const DASHBOARD_MODE =
   import.meta.env.VITE_DASHBOARD_MODE ?? API_MODE
+
+const RECRUITMENT_MODE =
+  import.meta.env.VITE_RECRUITMENT_MODE ?? API_MODE
+
+// Staff, locations, access codes, interviews, accounts and notifications.
+const ADMIN_MODE = import.meta.env.VITE_ADMIN_MODE ?? API_MODE
 
 /** Simulated network latency so loading states are exercised in development. */
 const delay = (ms = 220) => new Promise((r) => setTimeout(r, ms))
@@ -228,13 +234,18 @@ export const adminApi = {
   },
 
   async listJobs(): Promise<Job[]> {
-    if (API_MODE === 'live') return http.get<Job[]>('/admin/jobs')
+    if (RECRUITMENT_MODE === 'live') {
+      const response = await http.get<{ items: Job[] }>('/admin/jobs')
+      return response.items
+    }
     await delay()
     return jobs
   },
 
   async createJob(payload: Partial<Job>): Promise<Job> {
-    if (API_MODE === 'live') return http.post<Job>('/admin/jobs', payload)
+    if (RECRUITMENT_MODE === 'live') {
+      return http.post<Job>('/admin/jobs', payload)
+    }
     await delay(400)
     const created: Job = {
       id: `job-${jobs.length + 1}`,
@@ -262,7 +273,9 @@ export const adminApi = {
   },
 
   async updateJob(id: string, payload: Partial<Job>): Promise<Job> {
-    if (API_MODE === 'live') return http.patch<Job>(`/admin/jobs/${id}`, payload)
+    if (RECRUITMENT_MODE === 'live') {
+      return http.patch<Job>(`/admin/jobs/${id}`, payload)
+    }
     await delay(400)
     const idx = jobs.findIndex((j) => j.id === id)
     if (idx === -1) throw new Error('Job not found')
@@ -273,7 +286,7 @@ export const adminApi = {
   async listApplications(
     filters: ApplicationFilters = {},
   ): Promise<Paginated<Application>> {
-    if (API_MODE === 'live') {
+    if (RECRUITMENT_MODE === 'live') {
       return http.get<Paginated<Application>>('/admin/applications', {
         ...filters,
       })
@@ -330,14 +343,19 @@ export const adminApi = {
   },
 
   async getApplication(id: string): Promise<Application | undefined> {
-    if (API_MODE === 'live') return http.get<Application>(`/admin/applications/${id}`)
+    if (RECRUITMENT_MODE === 'live') {
+      return http.get<Application>(`/admin/applications/${id}`)
+    }
     await delay(150)
     return applications.find((a) => a.id === id)
   },
 
   async applicationEvents(applicationId: string): Promise<ApplicationEvent[]> {
-    if (API_MODE === 'live') {
-      return http.get<ApplicationEvent[]>(`/admin/applications/${applicationId}/events`)
+    if (RECRUITMENT_MODE === 'live') {
+      const response = await http.get<{ items: ApplicationEvent[] }>(
+        `/admin/applications/${applicationId}/events`,
+      )
+      return response.items
     }
     await delay(150)
     return applicationEvents
@@ -353,7 +371,7 @@ export const adminApi = {
     status: ApplicationStatus,
     reason?: string,
   ): Promise<Application> {
-    if (API_MODE === 'live') {
+    if (RECRUITMENT_MODE === 'live') {
       return http.patch<Application>(`/admin/applications/${id}/status`, {
         status,
         reason,
@@ -386,12 +404,16 @@ export const adminApi = {
     message: string,
     jobId: string,
   ): Promise<Shortlist[]> {
-    if (API_MODE === 'live') {
-      return http.post<Shortlist[]>('/admin/shortlists', {
-        application_ids: applicationIds,
-        message,
-        job_id: jobId,
-      })
+    if (RECRUITMENT_MODE === 'live') {
+      const response = await http.post<{ items: Shortlist[] }>(
+        '/admin/shortlists',
+        {
+          application_ids: applicationIds,
+          message,
+          job_id: jobId,
+        },
+      )
+      return response.items
     }
     await delay(600)
     const created: Shortlist[] = []
@@ -426,8 +448,10 @@ export const adminApi = {
   },
 
   async revokeShortlist(id: string): Promise<Shortlist> {
-    if (API_MODE === 'live') {
-      return http.patch<Shortlist>(`/admin/shortlists/${id}`, { status: 'revoked' })
+    if (RECRUITMENT_MODE === 'live') {
+      return http.patch<Shortlist>(`/admin/shortlists/${id}`, {
+        status: 'revoked',
+      })
     }
     await delay(400)
     const idx = shortlists.findIndex((s) => s.id === id)
@@ -440,8 +464,18 @@ export const adminApi = {
     return shortlists[idx]
   },
 
+  async resendShortlist(id: string): Promise<Notification> {
+    if (RECRUITMENT_MODE !== 'live') {
+      throw new Error('Message delivery is only available against the live API.')
+    }
+    return http.post<Notification>(`/admin/shortlists/${id}/resend`, {})
+  },
+
   async listShortlists(): Promise<Shortlist[]> {
-    if (API_MODE === 'live') return http.get<Shortlist[]>('/admin/shortlists')
+    if (RECRUITMENT_MODE === 'live') {
+      const response = await http.get<{ items: Shortlist[] }>('/admin/shortlists')
+      return response.items
+    }
     await delay()
     return shortlists
   },
@@ -466,7 +500,7 @@ export const adminApi = {
     instructions: string
     audience: string
   }): Promise<InterviewAnnouncement> {
-    if (API_MODE === 'live') {
+    if (ADMIN_MODE === 'live') {
       return http.post<InterviewAnnouncement>('/admin/interviews', payload)
     }
     await delay(450)
@@ -492,7 +526,7 @@ export const adminApi = {
     id: string,
     status: InterviewAnnouncement['status'],
   ): Promise<InterviewAnnouncement> {
-    if (API_MODE === 'live') {
+    if (ADMIN_MODE === 'live') {
       return http.patch<InterviewAnnouncement>(`/admin/interviews/${id}`, { status })
     }
     await delay(300)
@@ -502,10 +536,17 @@ export const adminApi = {
     return interviews[idx]
   },
 
+  async notifyInterview(id: string): Promise<{ queued: number }> {
+    if (ADMIN_MODE !== 'live') {
+      throw new Error('Interview notifications are only available against the live API.')
+    }
+    return http.post<{ queued: number }>(`/admin/interviews/${id}/notify`, {})
+  },
+
   async listAccessCodes(
     filters: AccessCodeFilters = {},
   ): Promise<Paginated<AccessCode>> {
-    if (API_MODE === 'live') {
+    if (ADMIN_MODE === 'live') {
       return http.get<Paginated<AccessCode>>('/admin/access-codes', { ...filters })
     }
     await delay()
@@ -529,9 +570,9 @@ export const adminApi = {
   async issueAccessCode(payload: {
     application_id: string
     type: 'applicant' | 'staff'
-    expires_at: string
+    expires_at?: string
   }): Promise<{ code: string; record: AccessCode }> {
-    if (API_MODE === 'live') {
+    if (ADMIN_MODE === 'live') {
       return http.post<{ code: string; record: AccessCode }>(
         '/admin/access-codes',
         payload,
@@ -555,7 +596,9 @@ export const adminApi = {
       issued_to: app?.applicant_id ?? null,
       issued_by: 'usr-admin-1',
       status: 'active',
-      expires_at: payload.expires_at,
+      expires_at:
+        payload.expires_at ??
+        new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
       used_at: null,
       failed_attempts: 0,
       created_at: new Date().toISOString(),
@@ -567,8 +610,10 @@ export const adminApi = {
   },
 
   async revokeAccessCode(id: string): Promise<AccessCode> {
-    if (API_MODE === 'live') {
-      return http.patch<AccessCode>(`/admin/access-codes/${id}`, { status: 'revoked' })
+    if (ADMIN_MODE === 'live') {
+      return http.patch<AccessCode>(`/admin/access-codes/${id}`, {
+        status: 'revoked',
+      })
     }
     await delay(350)
     const idx = accessCodes.findIndex((c) => c.id === id)
@@ -594,7 +639,7 @@ export const adminApi = {
   },
 
   async listStaff(filters: StaffFilters = {}): Promise<Paginated<StaffProfile>> {
-    if (API_MODE === 'live') {
+    if (ADMIN_MODE === 'live') {
       return http.get<Paginated<StaffProfile>>('/admin/staff', { ...filters })
     }
     await delay()
@@ -621,13 +666,35 @@ export const adminApi = {
   },
 
   async getStaff(id: string): Promise<StaffProfile | undefined> {
-    if (API_MODE === 'live') return http.get<StaffProfile>(`/admin/staff/${id}`)
+    if (ADMIN_MODE === 'live') {
+      return http.get<StaffProfile>(`/admin/staff/${id}`)
+    }
     await delay(150)
     return staffProfiles.find((s) => s.id === id)
   },
 
+  async createStaff(payload: {
+    first_name: string
+    last_name: string
+    email: string
+    phone: string
+    employment_category: EmploymentCategory
+    department_id?: string
+    location_id?: string
+    position?: string
+    appointment_date?: string
+  }): Promise<StaffProfile> {
+    if (ADMIN_MODE !== 'live') {
+      throw new Error('Manual staff entry is only available against the live API.')
+    }
+    return http.post<StaffProfile>('/admin/staff', payload)
+  },
+
   async listLocations(): Promise<Location[]> {
-    if (API_MODE === 'live') return http.get<Location[]>('/admin/locations')
+    if (RECRUITMENT_MODE === 'live') {
+      const response = await http.get<{ items: Location[] }>('/admin/locations')
+      return response.items
+    }
     await delay()
     return locations
   },
@@ -638,7 +705,7 @@ export const adminApi = {
     parent_id: string | null
     code?: string
   }): Promise<Location> {
-    if (API_MODE === 'live') {
+    if (ADMIN_MODE === 'live') {
       return http.post<Location>('/admin/locations', payload)
     }
     await delay(350)
@@ -658,8 +725,10 @@ export const adminApi = {
   },
 
   async approveLocation(id: string): Promise<Location> {
-    if (API_MODE === 'live') {
-      return http.patch<Location>(`/admin/locations/${id}`, { status: 'approved' })
+    if (ADMIN_MODE === 'live') {
+      return http.patch<Location>(`/admin/locations/${id}`, {
+        status: 'approved',
+      })
     }
     await delay(300)
     const idx = locations.findIndex((l) => l.id === id)
@@ -669,34 +738,118 @@ export const adminApi = {
   },
 
   async listDepartments(): Promise<Department[]> {
-    if (API_MODE === 'live') return http.get<Department[]>('/admin/departments')
+    if (ADMIN_MODE === 'live') {
+      const response = await http.get<{ items: Department[] }>(
+        '/admin/departments',
+      )
+      return response.items
+    }
     await delay(150)
     return departments
   },
 
   async listUsers(): Promise<User[]> {
-    if (API_MODE === 'live') return http.get<User[]>('/admin/users')
+    if (ADMIN_MODE === 'live') {
+      const response = await http.get<{ items: User[] }>('/admin/users')
+      return response.items
+    }
     await delay()
     return users
   },
 
   async approveUser(id: string): Promise<User> {
-    if (API_MODE === 'live') return http.patch<User>(`/admin/users/${id}`, { status: 'active' })
+    return this.updateUserStatus(id, 'active')
+  },
+
+  async updateUserStatus(
+    id: string,
+    status: 'active' | 'suspended' | 'disabled',
+  ): Promise<User> {
+    if (ADMIN_MODE === 'live') {
+      return http.patch<User>(`/admin/users/${id}`, { status })
+    }
     await delay(300)
     const idx = users.findIndex((u) => u.id === id)
     if (idx === -1) throw new Error('User not found')
-    users[idx] = { ...users[idx], status: 'active' }
+    users[idx] = { ...users[idx], status }
     return users[idx]
   },
 
+  async createAdminUser(payload: {
+    first_name: string
+    last_name: string
+    email: string
+    password: string
+    role: 'admin' | 'staff'
+  }): Promise<User> {
+    if (ADMIN_MODE !== 'live') {
+      throw new Error('Admin invitations are only available against the live API.')
+    }
+    return http.post<User>('/admin/users', payload)
+  },
+
+  async resetUserPassword(id: string, newPassword: string): Promise<void> {
+    if (ADMIN_MODE !== 'live') {
+      throw new Error('Password resets are only available against the live API.')
+    }
+    await http.post<{ updated: boolean }>(`/admin/users/${id}/reset-password`, {
+      new_password: newPassword,
+    })
+  },
+
   async listTemplates(): Promise<MessageTemplate[]> {
-    if (API_MODE === 'live') return http.get<MessageTemplate[]>('/admin/templates')
+    if (RECRUITMENT_MODE === 'live') {
+      const response = await http.get<{ items: MessageTemplate[] }>(
+        '/admin/templates',
+      )
+      return response.items
+    }
     await delay()
     return messageTemplates
   },
 
+  async updateTemplate(
+    id: string,
+    payload: { subject: string | null; body: string },
+  ): Promise<MessageTemplate> {
+    if (ADMIN_MODE !== 'live') {
+      throw new Error('Template editing is only available against the live API.')
+    }
+    return http.patch<MessageTemplate>(`/admin/templates/${id}`, payload)
+  },
+
+  async testTemplate(id: string): Promise<Notification> {
+    if (ADMIN_MODE !== 'live') {
+      throw new Error('Template tests are only available against the live API.')
+    }
+    return http.post<Notification>(`/admin/templates/${id}/test`, {})
+  },
+
+  async getAccessCodeSettings(): Promise<AdminSettings> {
+    if (ADMIN_MODE !== 'live') {
+      throw new Error('Settings are only available against the live API.')
+    }
+    return http.get<AdminSettings>('/admin/settings/access-codes')
+  },
+
+  async updateAccessCodeSettings(payload: {
+    access_code_length: number
+    access_code_ttl_days: number
+    access_code_max_attempts: number
+  }): Promise<AdminSettings> {
+    if (ADMIN_MODE !== 'live') {
+      throw new Error('Settings are only available against the live API.')
+    }
+    return http.patch<AdminSettings>('/admin/settings/access-codes', payload)
+  },
+
   async listNotifications(): Promise<Notification[]> {
-    if (API_MODE === 'live') return http.get<Notification[]>('/admin/notifications')
+    if (ADMIN_MODE === 'live') {
+      const response = await http.get<{ items: Notification[] }>(
+        '/admin/notifications',
+      )
+      return response.items
+    }
     await delay()
     return notifications
   },

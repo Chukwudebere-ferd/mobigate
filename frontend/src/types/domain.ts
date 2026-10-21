@@ -268,6 +268,14 @@ export interface MessageTemplate {
   created_at: string
 }
 
+export interface AdminSettings {
+  access_code_length: number
+  access_code_ttl_days: number
+  access_code_max_attempts: number
+  updated_at: string
+  updated_by: string | null
+}
+
 export interface Notification {
   id: string
   tenant_id: string | null
