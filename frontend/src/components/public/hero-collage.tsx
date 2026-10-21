@@ -4,26 +4,50 @@ import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { ApplicationStatusBadge, EmploymentCategoryBadge } from '@/components/ui/status-badges'
 import { cn } from '@/lib/cn'
-import { formatDate, formatTime, fullName, untilNow } from '@/lib/format'
-import { accessCodes, applications, interviews, shortlists, staffProfiles } from '@/mocks/seed'
+import { formatDate, formatTime, untilNow } from '@/lib/format'
 
 /**
  * Floating orbit around the landing hero.
  *
  * Four applicant avatars at the frame corners with small cursor arrows,
- * like the contract-management reference: real people from the seed data,
- * brand ring, gentle float. Decorative only (aria-hidden) — the same
- * records render as data in the static cards below on mobile.
+ * like the contract-management reference: fictional people, brand ring,
+ * gentle float. Decorative only (aria-hidden) — the same demo records
+ * render as data in the static cards below on mobile.
+ *
+ * Every value here is a frozen stand-in: the landing page never renders
+ * real candidates (privacy), so this data is decorative by design.
+ * Timestamps drift with page load so the cards always read as current.
  */
+const DEMO = {
+  shortlist: {
+    applicant: 'Ngozi Obi',
+    message:
+      'Dear Ngozi, congratulations — you have been shortlisted for the Senior Backend Engineer role. Report to the Human Resources office on Monday by 9:00 AM for your interview.',
+  },
+  interview: {
+    job: 'Senior Backend Engineer',
+    venue: 'Mobigate House, 14 Admiralty Way, Victoria Island',
+    at: new Date(Date.now() + 2 * 86_400_000).toISOString(),
+  },
+  application: {
+    name: 'Tunde Adebisi',
+    job: 'Frontend Engineer',
+    number: 'APP/LA/2026/0042',
+    status: 'shortlisted' as const,
+  },
+  code: {
+    code_hint: '4Q9M',
+    expires_at: new Date(Date.now() + 10 * 86_400_000).toISOString(),
+  },
+  staff: {
+    staff_id: 'STA/LA/2026/0007',
+    name: 'Aisha Bello',
+    position: 'Operations Officer',
+    employment_category: 'employee' as const,
+  },
+}
+
 export function HeroCollage({ className }: { className?: string }) {
-  const shortlist = shortlists.find((item) => item.id === 'sl-1')
-  const interview = interviews.find((item) => item.id === 'int-1')
-  const application = applications.find((item) => item.id === 'app-2')
-  const code = accessCodes.find((item) => item.id === 'code-1')
-  const staff = staffProfiles[0]
-
-  if (!shortlist || !interview || !application || !code || !staff) return null
-
   const people = [
     { first: 'Ngozi', last: 'Obi' },
     { first: 'Tunde', last: 'Adebisi' },
@@ -47,25 +71,25 @@ export function HeroCollage({ className }: { className?: string }) {
 
       {/* -- Mobile / tablet: static data cards under the copy -- */}
       <div className="grid gap-4 sm:grid-cols-2 lg:hidden">
-        <ShortlistNote message={shortlist.message} applicant={shortlist.applicant_name ?? ''} />
+        <ShortlistNote message={DEMO.shortlist.message} applicant={DEMO.shortlist.applicant} />
         <InterviewCard
-          job={interview.job_title ?? ''}
-          venue={interview.venue}
-          date={formatDate(interview.interview_at)}
-          time={formatTime(interview.interview_at)}
+          job={DEMO.interview.job}
+          venue={DEMO.interview.venue}
+          date={formatDate(DEMO.interview.at)}
+          time={formatTime(DEMO.interview.at)}
         />
         <ApplicationCard
-          name={fullName(application.first_name, application.last_name)}
-          job={application.job_title ?? ''}
-          number={application.application_number}
-          status={application.status}
+          name={DEMO.application.name}
+          job={DEMO.application.job}
+          number={DEMO.application.number}
+          status={DEMO.application.status}
         />
         <StaffCard
-          staffId={staff.staff_id}
-          name={fullName(staff.first_name, staff.last_name)}
-          position={staff.position ?? ''}
-          codeHint={code.code_hint}
-          expires={untilNow(code.expires_at)}
+          staffId={DEMO.staff.staff_id}
+          name={DEMO.staff.name}
+          position={DEMO.staff.position}
+          codeHint={DEMO.code.code_hint}
+          expires={untilNow(DEMO.code.expires_at)}
         />
       </div>
     </div>
@@ -210,7 +234,6 @@ function StaffCard({
   codeHint: string
   expires: string
 }) {
-  const staff = staffProfiles[0]
   return (
     <Frame label={`Staff ID ${staffId} for ${name}`}>
       <Eyebrow icon={ShieldCheck}>Staff ID issued</Eyebrow>
@@ -219,7 +242,7 @@ function StaffCard({
         {name} · {position}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-ink-100 pt-2">
-        {staff ? <EmploymentCategoryBadge category={staff.employment_category} /> : null}
+        <EmploymentCategoryBadge category={DEMO.staff.employment_category} />
         <Badge variant="success" dot>
           <KeyRound aria-hidden className="size-3" />
           ••••{codeHint}

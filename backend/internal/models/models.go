@@ -194,6 +194,8 @@ type Application struct {
 	Qualification     *string           `json:"qualification"`
 	CVDocumentID      *uuid.UUID        `json:"cv_document_id"`
 	PhotoDocumentID   *uuid.UUID        `json:"photo_document_id"`
+	ConsentAcceptedAt *time.Time        `json:"consent_accepted_at"`
+	ConsentVersion    *string           `json:"consent_version"`
 	Status            ApplicationStatus `json:"status"`
 	SubmittedAt       time.Time         `json:"submitted_at"`
 	UpdatedAt         time.Time         `json:"updated_at"`

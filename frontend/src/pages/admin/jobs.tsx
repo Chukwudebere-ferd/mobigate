@@ -43,7 +43,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { adminApi, locationPath } from '@/lib/api'
+import {
+  adminApi,
+  locationPath,
+  sortLocationsByPath,
+} from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import { EMPLOYMENT_CATEGORIES, JOB_STATUSES } from '@/types/domain'
 import type { EmploymentCategory, Job, JobStatus } from '@/types/domain'
@@ -62,6 +66,9 @@ const CATEGORY_LABELS: Record<EmploymentCategory, string> = {
   partner: 'Partner',
 }
 
+/** Sentinel value for the "type your own category" option. */
+const CUSTOM_CATEGORY = '__custom__'
+
 interface JobForm {
   title: string
   slug: string
@@ -69,6 +76,7 @@ interface JobForm {
   requirements: string
   location_id: string
   employment_category: string
+  custom_category: string
   openings: string
   publish_at: string
   deadline_at: string
@@ -82,6 +90,7 @@ const EMPTY_FORM: JobForm = {
   requirements: '',
   location_id: '',
   employment_category: '',
+  custom_category: '',
   openings: '1',
   publish_at: '',
   deadline_at: '',
@@ -103,13 +112,17 @@ function toDateInput(value: string | null | undefined): string {
 
 function jobToForm(job: Job | null): JobForm {
   if (!job) return EMPTY_FORM
+  const category = job.employment_category ?? ''
+  const isPreset = (EMPLOYMENT_CATEGORIES as readonly string[]).includes(category)
   return {
     title: job.title,
     slug: job.slug,
     description: job.description,
     requirements: job.requirements ?? '',
     location_id: job.location_id ?? '',
-    employment_category: job.employment_category ?? '',
+    employment_category:
+      category === '' ? '' : isPreset ? category : CUSTOM_CATEGORY,
+    custom_category: category !== '' && !isPreset ? category : '',
     openings: String(job.openings ?? 1),
     publish_at: toDateInput(job.publish_at),
     deadline_at: toDateInput(job.deadline_at),
@@ -171,6 +184,14 @@ function JobEditorDialog({
     const next: Record<string, string> = {}
     if (!form.title.trim()) next.title = 'A title is required.'
     if (!form.description.trim()) next.description = 'A description is required.'
+    if (form.employment_category === CUSTOM_CATEGORY) {
+      const custom = form.custom_category.trim()
+      if (!custom) {
+        next.custom_category = 'Enter a category name.'
+      } else if (custom.length > 80) {
+        next.custom_category = 'Keep the category to 80 characters or fewer.'
+      }
+    }
     if (form.publish_at && form.deadline_at) {
       if (form.deadline_at <= form.publish_at) {
         next.deadline_at = 'The deadline must fall after the publish date.'
@@ -188,16 +209,17 @@ function JobEditorDialog({
 
   function submit() {
     if (!validate()) return
+    const employmentCategory =
+      form.employment_category === CUSTOM_CATEGORY
+        ? form.custom_category.trim()
+        : form.employment_category
     const payload: Partial<Job> = {
       title: form.title.trim(),
       slug: form.slug.trim() || slugify(form.title),
       description: form.description.trim(),
       requirements: form.requirements.trim(),
       location_id: form.location_id || null,
-      employment_category:
-        form.employment_category === ''
-          ? null
-          : (form.employment_category as EmploymentCategory),
+      employment_category: employmentCategory || null,
       openings: Number(form.openings) || 1,
       publish_at: form.publish_at ? new Date(form.publish_at).toISOString() : null,
       deadline_at: form.deadline_at
@@ -208,7 +230,7 @@ function JobEditorDialog({
     saveMutation.mutate(payload)
   }
 
-  const locations = locationsQuery.data ?? []
+  const locations = sortLocationsByPath(locationsQuery.data ?? [])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange} className="sm:max-w-3xl">
@@ -326,16 +348,17 @@ function JobEditorDialog({
             </Select>
           </Field>
 
-          <Field
-            label="Employment category"
-            htmlFor="job-category"
-          >
+          <Field label="Employment category" htmlFor="job-category">
             <Select
               id="job-category"
               value={form.employment_category}
-              onChange={(event) =>
-                update('employment_category', event.target.value)
-              }
+              onChange={(event) => {
+                const value = event.target.value
+                update('employment_category', value)
+                if (value !== CUSTOM_CATEGORY) {
+                  update('custom_category', '')
+                }
+              }}
             >
               <option value="">Not specified</option>
               {EMPLOYMENT_CATEGORIES.map((category) => (
@@ -343,8 +366,29 @@ function JobEditorDialog({
                   {CATEGORY_LABELS[category]}
                 </option>
               ))}
+              <option value={CUSTOM_CATEGORY}>Other / custom…</option>
             </Select>
           </Field>
+
+          {form.employment_category === CUSTOM_CATEGORY && (
+            <Field
+              label="Custom category"
+              htmlFor="job-custom-category"
+              error={errors.custom_category}
+              hint="Type the category exactly as it should appear."
+            >
+              <Input
+                id="job-custom-category"
+                value={form.custom_category}
+                maxLength={80}
+                onChange={(event) =>
+                  update('custom_category', event.target.value)
+                }
+                placeholder="e.g. Intern, Consultant, Apprentice"
+                invalid={Boolean(errors.custom_category)}
+              />
+            </Field>
+          )}
 
           <Field
             label="Openings"

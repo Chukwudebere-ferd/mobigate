@@ -13,6 +13,8 @@ import { admin as adminPlugin } from 'better-auth/plugins'
 import { adminAc, userAc } from 'better-auth/plugins/admin/access'
 import { Pool } from 'pg'
 
+import { escapeHtml, sendEmail } from './email.js'
+
 const pool = new Pool({
   connectionString:
     process.env.DATABASE_URL ??
@@ -27,6 +29,34 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false,
+    resetPasswordTokenExpiresIn: 60 * 60,
+    sendResetPassword: async ({ user, url }) => {
+      const name = user.name?.trim() || 'there'
+      const safeName = escapeHtml(name)
+      const safeUrl = escapeHtml(url)
+
+      await sendEmail({
+        to: user.email,
+        subject: 'Reset your Mobigate Group password',
+        text: [
+          `Hi ${name},`,
+          '',
+          'We received a request to reset the password for your Mobigate Group account.',
+          `Reset it here: ${url}`,
+          '',
+          'This link expires in one hour. If you did not request it, you can ignore this email.',
+          '',
+          'Mobigate Group',
+        ].join('\n'),
+        html: [
+          `<p>Hi ${safeName},</p>`,
+          '<p>We received a request to reset the password for your Mobigate Group account.</p>',
+          `<p><a href="${safeUrl}">Reset your password</a></p>`,
+          '<p>This link expires in one hour. If you did not request it, you can ignore this email.</p>',
+          '<p>Mobigate Group</p>',
+        ].join(''),
+      })
+    },
   },
 
   // The Go service reads the tenant and role off the session. The role field

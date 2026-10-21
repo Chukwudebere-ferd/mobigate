@@ -45,7 +45,7 @@ const userTone: Record<UserStatus, Tone> = {
   disabled: 'neutral',
 }
 
-const categoryTone: Record<EmploymentCategory, Tone> = {
+const categoryTone: Partial<Record<EmploymentCategory, Tone>> = {
   director: 'accent',
   employee: 'brand',
   contractor: 'outline',
@@ -104,7 +104,7 @@ export function EmploymentCategoryBadge({
   className?: string
 }) {
   return (
-    <Badge variant={categoryTone[category]} className={className}>
+    <Badge variant={categoryTone[category] ?? 'neutral'} className={className}>
       {capitalize(category)}
     </Badge>
   )

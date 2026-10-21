@@ -17,7 +17,7 @@ import {
   ShieldCheck,
   TriangleAlert,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Controller, useForm, useWatch } from 'react-hook-form'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
@@ -32,13 +32,16 @@ import {
 } from '@/components/ui/card'
 import { Checkbox, Field, Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
-import { adminApi } from '@/lib/api'
+import { publicApi, sortLocationsByName, staffApi } from '@/lib/api'
 import { formatBytes } from '@/lib/format'
-import { EMPLOYMENT_CATEGORIES, type Application } from '@/types/domain'
+import { EMPLOYMENT_CATEGORIES, type StaffRedemption } from '@/types/domain'
 
 /* -------------------------------------------------------------------------- */
 /*  Schema                                                                    */
 /* -------------------------------------------------------------------------- */
+
+/** Uploads are images only, capped at 2 MB each (README §M4). */
+const MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
 
 /**
  * A file input value is a `FileList`; the check is duck-typed so the schema
@@ -72,7 +75,9 @@ const staffDetailsSchema = z.object({
   country_id: z.string().min(1, 'Select a country'),
   state_id: z.string().min(1, 'Select a state'),
   lga_id: z.string().min(1, 'Select an LGA'),
-  city_id: z.string().min(1, 'Select a city or town'),
+  // Optional: not every LGA in the reference tree has a city row. The LGA is
+  // used as the record's location when no city is chosen.
+  city_id: z.string().optional(),
 
   // Employment
   department_id: z.string().min(1, 'Select a department'),
@@ -121,6 +126,18 @@ const staffDetailsSchema = z.object({
     'You must accept the rules of engagement to continue',
   ),
 })
+  .superRefine((values, ctx) => {
+    for (const key of ['id_document', 'qualification_certificates'] as const) {
+      const file = values[key]?.[0]
+      if (file && file.size > MAX_DOCUMENT_BYTES) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [key],
+          message: 'Image must be 2 MB or smaller',
+        })
+      }
+    }
+  })
 
 type StaffDetailsValues = z.infer<typeof staffDetailsSchema>
 
@@ -142,13 +159,14 @@ function toGender(value: string | null): Gender {
 
 export function StaffOnboardingPage() {
   const [code, setCode] = useState('')
-  const [application, setApplication] = useState<Application | null>(null)
+  const [redemption, setRedemption] = useState<StaffRedemption | null>(null)
   const [staffId, setStaffId] = useState<string | null>(null)
+  const [staffName, setStaffName] = useState('')
 
   const redeem = useMutation({
-    mutationFn: (value: string) => adminApi.redeemAccessCode(value),
-    onSuccess: ({ application: redeemed }) => {
-      setApplication(redeemed)
+    mutationFn: (value: string) => staffApi.redeem(value),
+    onSuccess: (result) => {
+      setRedemption(result)
       toast.success('Access code verified')
     },
     onError: (error: Error) => {
@@ -157,9 +175,16 @@ export function StaffOnboardingPage() {
   })
 
   const submitDetails = useMutation({
-    mutationFn: (values: StaffDetailsValues) => createStaffProfile(values),
+    mutationFn: ({
+      ticket,
+      values,
+    }: {
+      ticket: string
+      values: StaffDetailsValues
+    }) => staffApi.completeOnboarding(ticket, buildOnboardingForm(values)),
     onSuccess: (result) => {
-      setStaffId(result.staff_id)
+      setStaffId(result.staff.staff_id)
+      setStaffName(`${result.staff.first_name} ${result.staff.last_name}`)
       toast.success('Staff profile created')
     },
     onError: (error: Error) => {
@@ -168,17 +193,17 @@ export function StaffOnboardingPage() {
   })
 
   if (staffId) {
-    return (
-      <SuccessState staffId={staffId} name={application ? `${application.first_name} ${application.last_name}` : ''} />
-    )
+    return <SuccessState staffId={staffId} name={staffName} />
   }
 
-  if (application) {
+  if (redemption) {
     return (
       <DetailsPhase
-        application={application}
+        redemption={redemption}
         isSubmitting={submitDetails.isPending}
-        onSubmit={(values) => submitDetails.mutate(values)}
+        onSubmit={(values) =>
+          submitDetails.mutate({ ticket: redemption.ticket, values })
+        }
       />
     )
   }
@@ -188,16 +213,16 @@ export function StaffOnboardingPage() {
       <PageHeader
         icon={KeyRound}
         title="Complete your onboarding"
-        description="Redeem the access code sent to you by the recruitment team, then submit your staff details to receive your Staff ID."
+        description="Redeem the access code handed to you by the recruitment team, then submit your staff details to receive your Staff ID."
       />
 
       <Card>
         <CardHeader>
           <CardTitle>Redeem your access code</CardTitle>
           <CardDescription>
-            Appointed candidates receive a six-character access code by email
-            and SMS once the appointment is confirmed. The code can be used
-            once and expires after fourteen days.
+            Appointed candidates receive a six-character access code from the
+            recruitment team once the appointment is confirmed. The code can be
+            used once and expires after fourteen days.
           </CardDescription>
         </CardHeader>
 
@@ -205,8 +230,9 @@ export function StaffOnboardingPage() {
           <div className="flex items-start gap-3 rounded-lg bg-brand-50 px-3.5 py-3 ring-1 ring-brand-100">
             <Mail className="mt-0.5 size-4 shrink-0 text-brand-700" aria-hidden />
             <p className="text-sm text-ink-700">
-              Did not get a code? Check your email and phone messages, then
-              contact the HR department quoting your application number.
+              Codes are handed to you directly and are never sent by email or
+              SMS. Did not get one? Contact the HR department quoting your
+              application number.
             </p>
           </div>
 
@@ -282,65 +308,114 @@ export function StaffOnboardingPage() {
 /* -------------------------------------------------------------------------- */
 
 function DetailsPhase({
-  application,
+  redemption,
   isSubmitting,
   onSubmit,
 }: {
-  application: Application
+  redemption: StaffRedemption
   isSubmitting: boolean
   onSubmit: (values: StaffDetailsValues) => void
 }) {
+  const application = redemption.application
+  const prefill = redemption.prefill
+  // An earlier snapshot saved from this form; its values win over prefill.
+  const draft = redemption.draft as Partial<StaffDetailsValues> | undefined
+
+  // The location tree is a public reference route — no admin session needed.
   const locationsQuery = useQuery({
-    queryKey: ['staff', 'locations'],
-    queryFn: () => adminApi.listLocations(),
+    queryKey: ['public', 'locations'],
+    queryFn: () => publicApi.listLocations(),
+    staleTime: 5 * 60 * 1000,
   })
 
-  const departmentsQuery = useQuery({
-    queryKey: ['staff', 'departments'],
-    queryFn: () => adminApi.listDepartments(),
-  })
-
-  const locations = locationsQuery.data ?? []
-  const departments = departmentsQuery.data ?? []
+  const locations = useMemo(
+    () => locationsQuery.data ?? [],
+    [locationsQuery.data],
+  )
+  const departments = redemption.departments
 
   const {
     control,
     register,
     handleSubmit,
+    getValues,
     setValue,
     formState: { errors },
   } = useForm<StaffDetailsValues>({
     resolver: zodResolver(staffDetailsSchema),
     mode: 'onTouched',
     defaultValues: {
-      first_name: application.first_name,
-      last_name: application.last_name,
-      email: application.email,
-      phone: application.phone,
-      gender: toGender(application.gender),
-      date_of_birth: application.date_of_birth ?? '',
-      address_line: application.address_line ?? '',
-      country_id: '',
-      state_id: '',
-      lga_id: '',
-      city_id: '',
-      department_id: '',
-      position: application.job_title ?? '',
-      appointment_date: '',
-      employment_category: 'employee',
-      bank_name: '',
-      bank_account_name: '',
-      bank_account_number: '',
-      guarantor_name: '',
-      guarantor_relationship: '',
-      guarantor_phone: '',
-      guarantor_address: '',
-      next_of_kin_name: '',
-      next_of_kin_relationship: '',
-      next_of_kin_phone: '',
-      rules_of_engagement: false,
+      first_name:
+        draft?.first_name ?? prefill?.first_name ?? application?.first_name ?? '',
+      last_name:
+        draft?.last_name ?? prefill?.last_name ?? application?.last_name ?? '',
+      email: draft?.email ?? prefill?.email ?? application?.email ?? '',
+      phone: draft?.phone ?? prefill?.phone ?? application?.phone ?? '',
+      gender:
+        draft?.gender ??
+        toGender(prefill?.gender ?? application?.gender ?? null),
+      date_of_birth:
+        draft?.date_of_birth ??
+        dateInputValue(prefill?.date_of_birth ?? application?.date_of_birth),
+      address_line:
+        draft?.address_line ??
+        prefill?.address_line ??
+        application?.address_line ??
+        '',
+      country_id: draft?.country_id ?? '',
+      state_id: draft?.state_id ?? '',
+      lga_id: draft?.lga_id ?? '',
+      city_id: draft?.city_id ?? '',
+      department_id: draft?.department_id ?? '',
+      position: draft?.position ?? application?.job_title ?? '',
+      appointment_date: draft?.appointment_date ?? '',
+      employment_category: draft?.employment_category ?? 'employee',
+      bank_name: draft?.bank_name ?? '',
+      bank_account_name: draft?.bank_account_name ?? '',
+      bank_account_number: draft?.bank_account_number ?? '',
+      guarantor_name: draft?.guarantor_name ?? '',
+      guarantor_relationship: draft?.guarantor_relationship ?? '',
+      guarantor_phone: draft?.guarantor_phone ?? '',
+      guarantor_address: draft?.guarantor_address ?? '',
+      next_of_kin_name: draft?.next_of_kin_name ?? '',
+      next_of_kin_relationship: draft?.next_of_kin_relationship ?? '',
+      next_of_kin_phone: draft?.next_of_kin_phone ?? '',
+      // Files are never stored in a draft or prefilled from the application.
+      id_document: undefined,
+      qualification_certificates: undefined,
+      rules_of_engagement: draft?.rules_of_engagement ?? false,
     },
   })
+
+  // Seed the country › state › LGA chain from the application's location
+  // once the tree loads; the draft keeps its own chain when it has one.
+  useEffect(() => {
+    const lgaId = prefill?.location_id
+    if (!lgaId || locations.length === 0 || getValues('lga_id')) return
+    const lga = locations.find((l) => l.id === lgaId)
+    if (!lga) return
+    const state = lga.parent_id
+      ? locations.find((l) => l.id === lga.parent_id)
+      : undefined
+    if (!state?.parent_id) return
+    setValue('country_id', state.parent_id)
+    setValue('state_id', state.id)
+    setValue('lga_id', lga.id)
+  }, [locations, prefill?.location_id, getValues, setValue])
+
+  // Best-effort draft autosave: the plain fields are snapshotted every ten
+  // seconds; files are excluded and re-attached at submission.
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const snapshot: Record<string, unknown> = { ...getValues() }
+      delete snapshot.id_document
+      delete snapshot.qualification_certificates
+      void staffApi.saveDraft(redemption.ticket, snapshot).catch(() => {
+        // A failed draft save must never interrupt typing.
+      })
+    }, 10_000)
+    return () => window.clearInterval(interval)
+  }, [getValues, redemption.ticket])
 
   const countryId = useWatch({ control, name: 'country_id' })
   const stateId = useWatch({ control, name: 'state_id' })
@@ -349,11 +424,22 @@ function DetailsPhase({
   const idDocument = useWatch({ control, name: 'id_document' })
   const certificates = useWatch({ control, name: 'qualification_certificates' })
 
-  const states = locations.filter((l) => l.parent_id === countryId)
-  const lgas = locations.filter((l) => l.parent_id === stateId)
-  const cities = locations.filter((l) => l.parent_id === lgaId)
+  const states = sortLocationsByName(
+    locations.filter((l) => l.parent_id === countryId),
+  )
+  const lgas = sortLocationsByName(
+    locations.filter((l) => l.parent_id === stateId),
+  )
+  const cities = sortLocationsByName(
+    locations.filter((l) => l.parent_id === lgaId),
+  )
 
-  const locationPath = pathOf(locations, cityId)
+  const locationPath = pathOf(locations, cityId ?? lgaId)
+
+  const displayName =
+    [prefill?.first_name ?? application?.first_name, prefill?.last_name ?? application?.last_name]
+      .filter(Boolean)
+      .join(' ') || 'candidate'
 
   return (
     <form
@@ -385,12 +471,11 @@ function DetailsPhase({
             </span>
             <div>
               <p className="text-sm font-semibold text-ink-900">
-                Access code verified — welcome,{' '}
-                {application.first_name} {application.last_name}
+                Access code verified — welcome, {displayName}
               </p>
               <p className="mt-0.5 text-sm text-ink-600">
-                {application.job_title ?? 'Staff role'}
-                {application.application_number
+                {application?.job_title ?? 'Staff role'}
+                {application?.application_number
                   ? ` · ${application.application_number}`
                   : ''}
               </p>
@@ -870,7 +955,8 @@ function DetailsPhase({
         <CardHeader>
           <CardTitle>Supporting documents</CardTitle>
           <CardDescription>
-            Upload clear scans or photographs. PDF, JPG or PNG, up to 5 MB each.
+            Upload clear scans or photographs. PNG, JPG or WEBP, up to 2 MB
+            each.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -883,7 +969,7 @@ function DetailsPhase({
             <Input
               id="id_document"
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
+              accept="image/png,image/jpeg,image/webp"
               invalid={Boolean(errors.id_document)}
               {...register('id_document')}
             />
@@ -904,7 +990,7 @@ function DetailsPhase({
             <Input
               id="qualification_certificates"
               type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
+              accept="image/png,image/jpeg,image/webp"
               invalid={Boolean(errors.qualification_certificates)}
               {...register('qualification_certificates')}
             />
@@ -1003,8 +1089,8 @@ function SuccessState({ staffId, name }: { staffId: string; name: string }) {
             </h1>
             <p className="mt-1.5 text-sm text-ink-500">
               {name ? `${name}, your` : 'Your'} staff record has been created.
-              Keep this reference safe — you will use it to sign in to the
-              staff portal.
+              Keep this reference safe — it identifies your staff record and
+              appears on all official documents.
             </p>
           </div>
 
@@ -1081,20 +1167,47 @@ function pathOf(
   return parts.join(' › ')
 }
 
+/** The date input wants YYYY-MM-DD; the API sends RFC3339 timestamps. */
+function dateInputValue(value: string | null | undefined): string {
+  return value ? value.slice(0, 10) : ''
+}
+
 /**
- * Creates the staff profile.
+ * Builds the multipart body for POST /staff/onboarding.
  *
- * The real implementation calls the Go endpoint that creates the staff
- * profile, allocates the Staff ID, consumes the access code and writes the
- * audit entry in a single transaction (README BR-11). The access code itself
- * is consumed at redemption time, so a code that has already been redeemed
- * can never be replayed. The mock below stands in for that endpoint until the
- * live API is wired up.
+ * Field names must match the Go contract exactly: the certificate upload is
+ * `qualification_document`, rules acceptance is the string "true", and the
+ * single `location_id` carries the deepest selected level (city, else LGA).
  */
-async function createStaffProfile(
-  _values: StaffDetailsValues,
-): Promise<{ staff_id: string }> {
-  await new Promise((resolve) => setTimeout(resolve, 700))
-  const year = new Date().getFullYear()
-  return { staff_id: `STA/LA/${year}/0001` }
+function buildOnboardingForm(values: StaffDetailsValues): FormData {
+  const form = new FormData()
+  form.set('first_name', values.first_name)
+  form.set('last_name', values.last_name)
+  form.set('email', values.email)
+  form.set('phone', values.phone)
+  form.set('gender', values.gender.toLowerCase())
+  form.set('date_of_birth', values.date_of_birth)
+  form.set('address_line', values.address_line)
+  form.set('location_id', values.city_id || values.lga_id)
+  form.set('department_id', values.department_id)
+  form.set('position', values.position)
+  form.set('appointment_date', values.appointment_date)
+  form.set('employment_category', values.employment_category)
+  form.set('bank_name', values.bank_name)
+  form.set('bank_account_name', values.bank_account_name)
+  form.set('bank_account_number', values.bank_account_number)
+  form.set('guarantor_name', values.guarantor_name)
+  form.set('guarantor_relationship', values.guarantor_relationship)
+  form.set('guarantor_phone', values.guarantor_phone)
+  form.set('guarantor_address', values.guarantor_address)
+  form.set('next_of_kin_name', values.next_of_kin_name)
+  form.set('next_of_kin_relationship', values.next_of_kin_relationship)
+  form.set('next_of_kin_phone', values.next_of_kin_phone)
+  form.set('rules_accepted', 'true')
+
+  const idFile = values.id_document?.[0]
+  if (idFile) form.set('id_document', idFile)
+  const qualificationFile = values.qualification_certificates?.[0]
+  if (qualificationFile) form.set('qualification_document', qualificationFile)
+  return form
 }

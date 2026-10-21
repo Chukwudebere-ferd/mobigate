@@ -16,6 +16,11 @@ import { AdminShortlistsPage } from '@/pages/admin/shortlists'
 import { AdminStaffPage } from '@/pages/admin/staff'
 
 import { LoginPage } from '@/pages/auth/login'
+import { SignupPage } from '@/pages/auth/signup'
+import {
+  ForgotPasswordPage,
+  ResetPasswordPage,
+} from '@/pages/auth/password-reset'
 import { ApplicantApplicationsPage } from '@/pages/applicant/applications'
 import { ApplicantInterviewsPage } from '@/pages/applicant/interviews'
 import { ApplicantPortalLayout } from '@/pages/applicant/layout'
@@ -48,6 +53,9 @@ export const routes = [
 
   // -- Authentication ------------------------------------------------------
   { path: '/login', element: <LoginPage /> },
+  { path: '/signup', element: <SignupPage /> },
+  { path: '/forgot-password', element: <ForgotPasswordPage /> },
+  { path: '/reset-password', element: <ResetPasswordPage /> },
 
   // -- Public site ---------------------------------------------------------
   {
@@ -62,8 +70,16 @@ export const routes = [
   },
 
   // -- Applicant portal ----------------------------------------------------
+  // Any signed-in, active account may open these screens; the API only ever
+  // returns the caller's own applications (/me scope).
   {
-    element: <ApplicantPortalLayout />,
+    element: (
+      <RequireRole
+        roles={['applicant', 'staff', 'admin', 'super_admin']}
+      >
+        <ApplicantPortalLayout />
+      </RequireRole>
+    ),
     children: [
       { path: '/applicant', element: <ApplicantApplicationsPage /> },
       { path: '/applicant/applications/:id', element: <ApplicantStatusPage /> },
@@ -72,8 +88,16 @@ export const routes = [
   },
 
   // -- Staff portal --------------------------------------------------------
+  // Staff onboarding is opened with an admin-issued access code; the API
+  // scopes every /staff read to the caller's own record.
   {
-    element: <StaffLayout />,
+    element: (
+      <RequireRole
+        roles={['applicant', 'staff', 'admin', 'super_admin']}
+      >
+        <StaffLayout />
+      </RequireRole>
+    ),
     children: [
       { path: '/staff', element: <StaffPortalPage /> },
       { path: '/staff/onboarding', element: <StaffOnboardingPage /> },

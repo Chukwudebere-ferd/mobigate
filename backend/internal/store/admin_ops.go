@@ -242,12 +242,23 @@ func (s *Store) IssueAccessCode(
 	); err != nil {
 		return "", models.AccessCode{}, err
 	}
+	// Notify-only (README M12 / BR-17): the template and payload carry no
+	// code. The admin delivers the plaintext out-of-band.
+	applicantName := strings.TrimSpace(firstName + " " + lastName)
+	title := jobTitle
+	if err := EnqueueNotification(ctx, tx, applicationTenant, &applicantID, "",
+		"access_code_issued", map[string]any{
+			"applicant_name": applicantName,
+			"first_name":     firstName,
+			"job_title":      title,
+		},
+	); err != nil {
+		return "", models.AccessCode{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return "", models.AccessCode{}, err
 	}
 
-	applicantName := strings.TrimSpace(firstName + " " + lastName)
-	title := jobTitle
 	return plaintext, models.AccessCode{
 		ID: codeID, TenantID: applicationTenant, CodeHint: hint,
 		Type: codeType, ApplicationID: &applicationID, IssuedTo: &applicantID,
@@ -573,6 +584,46 @@ func (s *Store) ListDepartments(ctx context.Context, tenantID *uuid.UUID) ([]mod
 		items = append(items, department)
 	}
 	return items, rows.Err()
+}
+
+// EnsureDepartment returns the tenant's department with this name, creating
+// it when it does not exist yet. The unique expression index in migration
+// 0008 makes this safe when two admins submit the same name together.
+func (s *Store) EnsureDepartment(
+	ctx context.Context,
+	tenantID uuid.UUID,
+	name string,
+) (models.Department, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return models.Department{}, fmt.Errorf("%w: department name is required", ErrValidation)
+	}
+	if len([]rune(name)) > 80 {
+		return models.Department{}, fmt.Errorf("%w: department name must be 80 characters or fewer", ErrValidation)
+	}
+
+	var (
+		department         models.Department
+		rawID, rawTenantID string
+	)
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO departments (tenant_id, name)
+		VALUES ($1, $2)
+		ON CONFLICT (tenant_id, lower(btrim(name)))
+		DO UPDATE SET name = departments.name
+		RETURNING id, tenant_id, name`,
+		tenantID, name,
+	).Scan(&rawID, &rawTenantID, &department.Name)
+	if err != nil {
+		return models.Department{}, err
+	}
+	if department.ID, err = uuid.Parse(rawID); err != nil {
+		return models.Department{}, err
+	}
+	if department.TenantID, err = uuid.Parse(rawTenantID); err != nil {
+		return models.Department{}, err
+	}
+	return department, nil
 }
 
 // ListUsers returns domain user accounts in the tenant scope.

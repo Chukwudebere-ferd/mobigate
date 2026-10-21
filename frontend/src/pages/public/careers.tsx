@@ -18,7 +18,7 @@ import { buttonVariants } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input, Select } from '@/components/ui/input'
 import { cn } from '@/lib/cn'
-import { employmentCategoryLabels, locationPath, publicApi } from '@/lib/api'
+import { employmentCategoryLabel, locationPath, publicApi } from '@/lib/api'
 import { formatDate } from '@/lib/format'
 import type { EmploymentCategory, Job } from '@/types/domain'
 
@@ -301,7 +301,7 @@ export function CareersPage() {
               <option value="all">All employment types</option>
               {categories.map((category) => (
                 <option key={category} value={category}>
-                  {employmentCategoryLabels[category]}
+                  {employmentCategoryLabel(category)}
                 </option>
               ))}
             </Select>
@@ -368,7 +368,7 @@ export function CareersPage() {
                         <Tag icon={MapPin}>{row.locationName}</Tag>
                         {row.category ? (
                           <Tag icon={Briefcase}>
-                            {employmentCategoryLabels[row.category]}
+                            {employmentCategoryLabel(row.category)}
                           </Tag>
                         ) : null}
                         <Tag icon={Users}>

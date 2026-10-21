@@ -11,16 +11,12 @@ pnpm install
 pnpm dev        # http://localhost:5173
 ```
 
-The frontend runs against an **in-memory mock** by default, so every screen
-works without a backend. To point it at the Go API instead:
-
-```bash
-VITE_API_MODE=live pnpm dev
-```
+The frontend talks to the Go API (`/api`) and the Better Auth service
+(`/api/auth`). With the Vite dev proxy both share the dev server's origin, so
+no configuration is needed when all three processes run locally:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `VITE_API_MODE` | `mock` | `mock` uses seed data; `live` calls the Go API |
 | `VITE_API_URL` | same origin | Base URL for the Go API |
 | `VITE_AUTH_URL` | same origin | Base URL for Better Auth |
 
@@ -43,7 +39,7 @@ admin, applicant and staff portals render different content per role.
 |---|---|
 | `/` | Open roles, search and filters, how it works |
 | `/jobs/:slug` | Role detail, requirements, apply CTA |
-| `/apply/:slug` | Application form with CV and photo upload |
+| `/apply/:slug` | Application form with passport photo upload (sign-in required) |
 | `/application/received` | Application number confirmation |
 
 ### Applicant portal
@@ -78,31 +74,15 @@ admin, applicant and staff portals render different content per role.
 
 ## Reviewing a portal
 
+Roles are decided by the backend, not the frontend: sign in through
+`/login` (or create an account at `/signup` as an applicant) and the Go
+API's `/me` response routes you to the matching portal. Roles:
+`super_admin` · `admin` · `applicant` · `staff`.
+
 Open **`/preview`** for the screen index. It lists every screen with a link,
-the source file, and a note on what to review, and has a role switcher in the
-top right.
-
-The mock session picks a role from the URL. Visit a portal's route directly,
-or set the role from the browser console:
-
-```js
-localStorage.setItem('mgm.mock.role', 'admin')
-location.reload()
-```
-
-Roles: `super_admin` · `admin` · `applicant` · `staff`.
-
-### Demo data
-
-| Account | Shows |
-|---|---|
-| Ngozi Obi (applicant) | Shortlisted on Finance Officer, plus a rejected application |
-| Tunde Adebisi (staff) | Appointed, Staff ID `STA/LA/2026/0001` |
-| Aisha Adeyemi (admin) | Lagos state admin |
-| Chidi Okonkwo (super admin) | Platform admin |
-
-Working access codes for `/staff/onboarding` (matched on the last four
-characters): `MGK7M2`, `5R5T1P`, `8H2N7Q`.
+the source file, and a note on what to review. Note that the preview renders
+against a static in-app harness session (admin role, no network), which keeps
+every route renderable without a backend; it never reaches a real browser.
 
 ## Architecture
 
@@ -116,7 +96,6 @@ src/
 │   ├── auth-client  Better Auth React client
 │   ├── cn.ts        Class merging
 │   └── format.ts    Date, byte, and name formatting
-├── mocks/           Seed data for mock mode
 ├── pages/           Route components, grouped by portal
 ├── providers/       Session provider
 ├── routes.tsx       The route table, shared by the app and the test harness
@@ -126,13 +105,10 @@ src/
 ### The API contract
 
 `src/lib/api/index.ts` is the single seam between the UI and the backend. It
-exports `publicApi` and `adminApi`; each function is async and shaped like a
-REST endpoint.
-
-In mock mode they resolve from `src/mocks/seed.ts` with simulated latency. In
-live mode they issue HTTP requests through `src/lib/api/client.ts`. Pages
-never know which mode they are in, so switching to the real backend is a
-one-line change.
+exports `publicApi` (careers site and signed-in applicant), `staffApi` (staff
+onboarding and portal) and `adminApi`; each function issues HTTP requests
+through `src/lib/api/client.ts` against the Go API and is shaped like the
+REST endpoint it calls.
 
 ### Data fetching
 

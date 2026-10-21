@@ -82,10 +82,3 @@ func FormatApplicationNumber(stateCode string, year, sequence int) string {
 
 // base32 is used only if a future requirement calls for longer tokens.
 var base32Enc = base32.StdEncoding.WithPadding(base32.NoPadding)
-
-// GenerateAccessCodeMock returns a fixed-format placeholder code. It exists
-// only so the HTTP contract can be exercised before the persistence layer
-// lands; production code paths use GenerateAccessCode.
-func GenerateAccessCodeMock() string {
-	return "K7M2Q9"
-}

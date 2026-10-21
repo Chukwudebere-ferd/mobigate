@@ -189,6 +189,44 @@ func (h *Handler) listDepartmentsAdmin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+func (h *Handler) createDepartment(w http.ResponseWriter, r *http.Request) {
+	scope, ok := h.adminScope(w, r)
+	if !ok {
+		return
+	}
+	var payload struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	name := strings.TrimSpace(payload.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "department name is required")
+		return
+	}
+	if len([]rune(name)) > 80 {
+		writeError(w, http.StatusBadRequest, "department name must be 80 characters or fewer")
+		return
+	}
+
+	tenantID := scope
+	if tenantID == nil {
+		tenantID = adminTenantID(r)
+	}
+	if tenantID == nil {
+		writeError(w, http.StatusForbidden, "account has no tenant scope")
+		return
+	}
+	department, err := h.Store.EnsureDepartment(r.Context(), *tenantID, name)
+	if err != nil {
+		writeStoreError(w, err, "could not create department")
+		return
+	}
+	writeJSON(w, http.StatusCreated, department)
+}
+
 func (h *Handler) listUsersAdmin(w http.ResponseWriter, r *http.Request) {
 	if !requireSuperAdmin(w, r) {
 		return

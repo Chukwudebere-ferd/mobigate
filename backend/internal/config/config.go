@@ -17,6 +17,19 @@ type Config struct {
 	AuthSecret     string
 	AllowedHosts   []string
 	AllowedOrigins []string
+
+	// ByteshipAPIKey authenticates file uploads (photos, staff documents).
+	// Files are stored private and delivered through signed URLs.
+	ByteshipAPIKey string
+	ByteshipBaseURL string
+
+	// SendLiberty delivers transactional email. SendLibertyFrom must use the
+	// display-name format so candidates see the brand, not a relay address:
+	//   "Mobigate Group" <you@gmail.com>
+	SendLibertyAPIKey  string
+	SendLibertyBaseURL string
+	SendLibertyFrom    string
+	SendLibertyReplyTo string
 }
 
 // Load reads configuration from the environment, applying safe defaults for
@@ -40,6 +53,14 @@ func Load() (*Config, error) {
 			env("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"),
 			",",
 		),
+
+		ByteshipAPIKey:  env("BYTESHIP_API_KEY", ""),
+		ByteshipBaseURL: env("BYTESHIP_BASE_URL", ""), // empty = SDK default
+
+		SendLibertyAPIKey:  env("SENDLIBERTY_API_KEY", ""),
+		SendLibertyBaseURL: env("SENDLIBERTY_BASE_URL", "https://sendliberty.com"),
+		SendLibertyFrom:    env("SENDLIBERTY_FROM", ""),
+		SendLibertyReplyTo: env("SENDLIBERTY_REPLY_TO", ""),
 	}
 
 	if cfg.DatabaseURL == "" {

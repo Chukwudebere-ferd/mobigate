@@ -1,3 +1,5 @@
+github.com/byteshipcloud/byteship-go v0.1.5 h1:rby7SmyVoRY5vJwJO+Oc4wUAZcjfVoqjQWh+t19UNZQ=
+github.com/byteshipcloud/byteship-go v0.1.5/go.mod h1:re4iJn66WkTjhqUQ/zcxUV/3AWqy6wKY/k7uNVOfMt4=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/go-chi/chi/v5 v5.5.0 h1:xdKQ1dJmVJsmgahrXSKhUx8NyVPzpwdlyrrQFpMPJgg=
 github.com/go-chi/chi/v5 v5.5.0/go.mod h1:d1IG7GtKPSjPyBP365PH8sAGVHk3qfB/IhjFNRH1wWM=

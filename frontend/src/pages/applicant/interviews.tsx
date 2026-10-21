@@ -41,7 +41,7 @@ export function ApplicantInterviewsPage() {
 
   const announcementsQuery = useQuery({
     queryKey: ['applicant', 'announcements', userId],
-    queryFn: () => publicApi.announcementsFor(userId),
+    queryFn: () => publicApi.announcementsFor(),
     enabled: Boolean(userId),
   })
 
@@ -72,7 +72,7 @@ export function ApplicantInterviewsPage() {
           <EmptyState
             icon={MessageSquareText}
             title="No interview announcements yet"
-            description="When the recruitment team publishes an interview for a role you applied for, the details will appear here and you will receive an email and SMS."
+            description="When the recruitment team publishes an interview for a role you applied for, the details will appear here and you will receive an email."
           />
         </Card>
       ) : (

@@ -772,7 +772,7 @@ The repository contains only this document, so the stack is a proposal.
 | Auth | Custom session auth (httpOnly cookie + `sessions` table) | Full control over the pending-approval and redemption flows, which are core to this system |
 | File storage | S3-compatible object storage (AWS S3 / Cloudflare R2) | Durable, cheap, off-web-root; served through an authorization gate |
 | Queue | Redis + BullMQ, or pg-boss / SQS | Notification delivery, CV processing, email |
-| Email | Resend or Postmark | Transactional delivery with deliverability tooling |
+| Email | SendLiberty | Transactional delivery through the connected Mobigate Gmail/Workspace account |
 | SMS / WhatsApp | Termii/Arkesel + WhatsApp Business Cloud API | Nigerian market fit; both behind a provider interface |
 | Deployment | Vercel (app) + managed Postgres (Neon/Supabase/RDS) | Low ops; environment parity between staging and production |
 

@@ -254,6 +254,17 @@
     color: var(--color-brand-950);
   }
 
+  /* Native select popups are rendered by the browser/OS and do not reliably
+     inherit oklch() text colours. Force the light system palette and an
+     explicit sRGB option colour so every dropdown stays readable. */
+  select {
+    color-scheme: light;
+  }
+  select option {
+    background-color: #ffffff;
+    color: #1b1e28;
+  }
+
   /* Slimmer scrollbars inside panels and tables. */
   .scroll-slim {
     scrollbar-width: thin;

@@ -27,41 +27,33 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { EmptyState, Spinner } from '@/components/ui/empty-state'
+import { Spinner } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   EmploymentCategoryBadge,
   StaffStatusBadge,
 } from '@/components/ui/status-badges'
-import { adminApi } from '@/lib/api'
+import { staffApi } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatBytes, formatDate, formatDateTime } from '@/lib/format'
 import { useSession } from '@/providers/session-provider'
-import type { Document, StaffProfile } from '@/types/domain'
 
 export function StaffPortalPage() {
   const { session } = useSession()
-  const staffId = session?.user.staff_id
 
+  // The API scopes the record to the signed-in user; no id is passed.
   const staffQuery = useQuery({
-    queryKey: ['staff', 'me', staffId],
-    queryFn: async () => {
-      const result = await adminApi.listStaff({
-        search: staffId,
-        per_page: 10,
-      })
-      return result.items.find((s) => s.staff_id === staffId) ?? null
-    },
-    enabled: Boolean(staffId),
+    queryKey: ['staff', 'me'],
+    queryFn: () => staffApi.me(),
+    retry: false,
   })
 
-  const applicationQuery = useQuery({
-    queryKey: ['staff', 'my-application', staffQuery.data?.application_id],
-    queryFn: () => adminApi.getApplication(staffQuery.data?.application_id ?? ''),
-    enabled: Boolean(staffQuery.data?.application_id),
-  })
+  const staff = staffQuery.data?.staff
+  const documents = staffQuery.data?.documents ?? []
 
-  if (!staffId) {
+  if (staffQuery.isLoading) return <Spinner />
+
+  if (!staff) {
     return (
       <div className="space-y-6">
         <PageHeader
@@ -81,7 +73,7 @@ export function StaffPortalPage() {
                 </p>
                 <p className="mt-1 max-w-xl text-sm text-ink-600">
                   You have signed in, but your staff record has not been created
-                  yet. Redeem the access code sent to you by the recruitment
+                  yet. Redeem the access code handed to you by the recruitment
                   team and submit your staff details to receive your Staff ID.
                 </p>
               </div>
@@ -97,29 +89,6 @@ export function StaffPortalPage() {
       </div>
     )
   }
-
-  if (staffQuery.isLoading) return <Spinner />
-
-  const staff = staffQuery.data
-
-  if (!staff) {
-    return (
-      <Card>
-        <EmptyState
-          icon={IdCard}
-          title="No staff record found"
-          description={`We could not find a staff record for ${staffId}. If you have just been appointed, redeem your access code to complete onboarding.`}
-          action={
-            <Link to="/staff/onboarding" className={buttonVariants({})}>
-              Complete onboarding
-            </Link>
-          }
-        />
-      </Card>
-    )
-  }
-
-  const documents = documentsFor(staff, applicationQuery.data)
 
   return (
     <div className="space-y-6">
@@ -503,62 +472,4 @@ function Detail({
       </div>
     </div>
   )
-}
-
-/**
- * The document list is assembled from the staff record. The live API returns
- * the `documents` rows owned by the staff record; the mock has no documents
- * collection, so the uploaded CV on the linked application stands in for it.
- */
-function documentsFor(
-  staff: StaffProfile,
-  application: { cv_file_name?: string } | undefined,
-): Document[] {
-  const documents: Document[] = []
-
-  if (application?.cv_file_name) {
-    documents.push({
-      id: 'doc-cv',
-      tenant_id: staff.tenant_id,
-      owner_type: 'staff',
-      owner_id: staff.id,
-      category: 'Curriculum vitae',
-      file_name: application.cv_file_name,
-      storage_key: `staff/${staff.id}/cv`,
-      mime_type: 'application/pdf',
-      size_bytes: 284_672,
-      uploaded_by: staff.user_id,
-      created_at: staff.created_at,
-    })
-  }
-
-  documents.push({
-    id: 'doc-id',
-    tenant_id: staff.tenant_id,
-    owner_type: 'staff',
-    owner_id: staff.id,
-    category: 'Identity document',
-    file_name: `${staff.first_name}_${staff.last_name}_National_ID.pdf`,
-    storage_key: `staff/${staff.id}/national-id`,
-    mime_type: 'application/pdf',
-    size_bytes: 153_600,
-    uploaded_by: staff.user_id,
-    created_at: staff.created_at,
-  })
-
-  documents.push({
-    id: 'doc-qual',
-    tenant_id: staff.tenant_id,
-    owner_type: 'staff',
-    owner_id: staff.id,
-    category: 'Qualification certificate',
-    file_name: `${staff.first_name}_${staff.last_name}_Qualification.pdf`,
-    storage_key: `staff/${staff.id}/qualification`,
-    mime_type: 'application/pdf',
-    size_bytes: 421_888,
-    uploaded_by: staff.user_id,
-    created_at: staff.created_at,
-  })
-
-  return documents
 }

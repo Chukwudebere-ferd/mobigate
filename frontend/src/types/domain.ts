@@ -17,7 +17,11 @@ export const EMPLOYMENT_CATEGORIES = [
   'contractor',
   'partner',
 ] as const
-export type EmploymentCategory = (typeof EMPLOYMENT_CATEGORIES)[number]
+/**
+ * The four values above are the suggested categories. Admin-created jobs may
+ * also carry a custom category typed by the admin.
+ */
+export type EmploymentCategory = string
 
 export const APPLICATION_STATUSES = [
   'pending',
@@ -129,6 +133,8 @@ export interface Application {
   qualification: string | null
   cv_document_id: string | null
   photo_document_id: string | null
+  consent_accepted_at?: string | null
+  consent_version?: string | null
   status: ApplicationStatus
   submitted_at: string
   updated_at: string
@@ -388,4 +394,63 @@ export interface Session {
 export interface MeResponse {
   user: Session['user']
   tenant: { id: string; name: string } | null
+}
+
+/**
+ * Applicant details recovered from an application when a staff access code
+ * is redeemed, used to prefill the onboarding form.
+ */
+export interface StaffRedeemPrefill {
+  first_name?: string | null
+  last_name?: string | null
+  email?: string | null
+  phone?: string | null
+  gender?: string | null
+  /** RFC3339 from the API; the date input needs the YYYY-MM-DD prefix. */
+  date_of_birth?: string | null
+  location_id?: string | null
+  address_line?: string | null
+}
+
+/** Response from POST /staff/redeem. */
+export interface StaffRedemption {
+  /** Short-lived ticket authorising the draft and submission routes. */
+  ticket: string
+  ticket_expires_at: string
+  departments: Department[]
+  application?: Application
+  prefill?: StaffRedeemPrefill
+  /** Earlier form snapshot saved as a draft, if any. */
+  draft?: Record<string, unknown>
+}
+
+/** A staff document row as returned by GET /staff/me (no download URL). */
+export interface StaffDocument {
+  id: string
+  category: string
+  file_name: string
+  mime_type: string
+  size_bytes: number
+  created_at: string
+}
+
+/** Response from GET /staff/me. */
+export interface StaffMeResponse {
+  staff: StaffProfile
+  documents: StaffDocument[]
+}
+
+/** Response from GET /staff/onboarding/draft. */
+export interface StaffDraftResponse {
+  draft: Record<string, unknown>
+}
+
+/** Response from PUT /staff/onboarding/draft. */
+export interface StaffDraftSaveResponse {
+  saved: boolean
+}
+
+/** Response from POST /staff/onboarding. */
+export interface StaffOnboardingResponse {
+  staff: StaffProfile
 }

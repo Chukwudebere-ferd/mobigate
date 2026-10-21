@@ -47,6 +47,7 @@ const jobColumns = `
 
 type queryer interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
 // ListJobs returns jobs in the tenant scope with derived display fields.
@@ -346,13 +347,16 @@ func (s *Store) SetApplicationStatus(
 	var (
 		current     models.ApplicationStatus
 		rawTenantID string
+		firstName, lastName, email, jobTitle string
 	)
 	err = tx.QueryRow(ctx, `
-		SELECT status, tenant_id FROM applications
-		WHERE id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)
-		FOR UPDATE`,
+		SELECT a.status, a.tenant_id, a.first_name, a.last_name, a.email, j.title
+		FROM applications a
+		JOIN jobs j ON j.id = a.job_id
+		WHERE a.id = $1 AND ($2::uuid IS NULL OR a.tenant_id = $2)
+		FOR UPDATE OF a`,
 		id, tenantID,
-	).Scan(&current, &rawTenantID)
+	).Scan(&current, &rawTenantID, &firstName, &lastName, &email, &jobTitle)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.Application{}, ErrNotFound
 	}
@@ -390,6 +394,20 @@ func (s *Store) SetApplicationStatus(
 		map[string]any{"status": status, "reason": reason},
 	); err != nil {
 		return models.Application{}, err
+	}
+	// M12: a rejection tells the candidate. Queued in the same transaction;
+	// delivery is asynchronous through the notify worker.
+	if current != status && status == models.ApplicationRejected {
+		applicantName := strings.TrimSpace(firstName + " " + lastName)
+		if err := EnqueueNotification(ctx, tx, applicationTenant, nil, email,
+			"application_rejected", map[string]any{
+				"applicant_name": applicantName,
+				"first_name":     firstName,
+				"job_title":      jobTitle,
+			},
+		); err != nil {
+			return models.Application{}, err
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return models.Application{}, err

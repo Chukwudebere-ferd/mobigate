@@ -30,13 +30,14 @@ export function ApplicantApplicationsPage() {
 
   const applicationsQuery = useQuery({
     queryKey: ['applicant', 'applications', userId],
-    queryFn: () => publicApi.myApplications(userId),
+    // The API scopes these to the signed-in account; no id is passed.
+    queryFn: () => publicApi.myApplications(),
     enabled: Boolean(userId),
   })
 
   const announcementsQuery = useQuery({
     queryKey: ['applicant', 'announcements', userId],
-    queryFn: () => publicApi.announcementsFor(userId),
+    queryFn: () => publicApi.announcementsFor(),
     enabled: Boolean(userId),
   })
 

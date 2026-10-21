@@ -5,8 +5,9 @@
  * (Better Auth) issues a session cookie; this client sends it automatically
  * and treats 401 as "signed out".
  *
- * The frontend runs against mocks by default (see src/lib/api/index.ts).
- * Setting VITE_API_MODE=live points these calls at the Go server.
+ * Every call targets the Go server. The backend serves the API under /api;
+ * VITE_API_URL may override this with a full origin, e.g.
+ * https://api.example.com/api.
  */
 
 export class ApiError extends Error {
@@ -63,14 +64,27 @@ export async function request<T>(
 ): Promise<T> {
   const { body, query, headers, ...rest } = options
 
+  // FormData and URLSearchParams carry their own content type (multipart
+  // boundary / form-urlencoded); the browser sets it, so no JSON header.
+  const isFormLike =
+    (typeof FormData !== 'undefined' && body instanceof FormData) ||
+    (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams)
+
   const response = await fetch(buildUrl(path, query), {
     credentials: 'include',
     ...rest,
     headers: {
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(body !== undefined && !isFormLike
+        ? { 'Content-Type': 'application/json' }
+        : {}),
       ...headers,
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body:
+      body === undefined
+        ? undefined
+        : isFormLike
+          ? body
+          : JSON.stringify(body),
   })
 
   if (response.status === 204) return undefined as T
@@ -98,13 +112,18 @@ export async function request<T>(
 }
 
 export const http = {
-  get: <T>(path: string, query?: RequestOptions['query']) =>
-    request<T>(path, { method: 'GET', query }),
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body }),
-  patch: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'PATCH', body }),
-  put: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'PUT', body }),
+  get: <T>(
+    path: string,
+    query?: RequestOptions['query'],
+    headers?: Record<string, string>,
+  ) => request<T>(path, { method: 'GET', query, headers }),
+  // The optional headers argument carries per-request headers such as
+  // X-Onboarding-Ticket on the staff draft and submission routes.
+  post: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'POST', body, headers }),
+  patch: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'PATCH', body, headers }),
+  put: <T>(path: string, body?: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'PUT', body, headers }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }

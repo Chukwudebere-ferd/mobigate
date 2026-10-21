@@ -45,7 +45,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { adminApi, childrenOf, descendantsOf, locationPath } from '@/lib/api'
+import {
+  adminApi,
+  descendantsOf,
+  locationPath,
+  sortLocationsByName,
+} from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatDate, formatDateTime, humanize, relativeTime } from '@/lib/format'
 import { APPLICATION_STATUSES } from '@/types/domain'
@@ -883,11 +888,18 @@ export function AdminApplicationsPage() {
   const total = listQuery.data?.total ?? 0
   const totalPages = listQuery.data?.total_pages ?? 1
 
-  const states: Location[] = (locationsQuery.data ?? []).filter(
-    (location) => location.type === 'state',
+  const locationItems = locationsQuery.data ?? []
+  const states: Location[] = sortLocationsByName(
+    locationItems.filter((location) => location.type === 'state'),
   )
   const lgas: Location[] = filters.state_id
-    ? childrenOf(filters.state_id).filter((location) => location.type === 'lga')
+    ? sortLocationsByName(
+        locationItems.filter(
+          (location) =>
+            location.type === 'lga' &&
+            location.parent_id === filters.state_id,
+        ),
+      )
     : []
   const lgaCoverage = filters.lga_id
     ? descendantsOf(filters.lga_id).length

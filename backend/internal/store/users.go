@@ -72,6 +72,30 @@ func (s *Store) UserByID(ctx context.Context, id string) (models.User, error) {
 	return user, nil
 }
 
+// ProvisionApplicant creates the domain users row for a freshly signed-up
+// applicant. Better Auth owns the credential; the domain row is what the Go
+// API authorises against, and it is always created with the lowest role —
+// the client can never choose it.
+func (s *Store) ProvisionApplicant(ctx context.Context, id string, email, firstName, lastName string) (models.User, error) {
+	userID, err := uuid.Parse(id)
+	if err != nil {
+		return models.User{}, ErrNotFound
+	}
+
+	const q = `
+		INSERT INTO users (id, tenant_id, role, email, first_name, last_name, status)
+		VALUES ($1, NULL, 'applicant', $2, $3, $4, 'active')
+		ON CONFLICT (id) DO NOTHING
+	`
+	if _, err := s.pool.Exec(ctx, q, userID, email, firstName, lastName); err != nil {
+		// A different account already holds this email (CITEXT unique).
+		return models.User{}, mapWriteError(err)
+	}
+
+	// Reload through the canonical path so the response matches UserByID.
+	return s.UserByID(ctx, id)
+}
+
 // TenantByID loads a tenant for display (the state scope shown in the admin
 // shell). It is not used for authorization decisions.
 func (s *Store) TenantByID(ctx context.Context, id string) (models.Tenant, error) {

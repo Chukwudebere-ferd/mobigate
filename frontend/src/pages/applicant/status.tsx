@@ -28,7 +28,7 @@ import {
 import { EmptyState, Spinner } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
 import { ApplicationStatusBadge } from '@/components/ui/status-badges'
-import { adminApi, locationPath, publicApi } from '@/lib/api'
+import { locationPath, publicApi } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatDate, formatDateTime, fullName } from '@/lib/format'
 import { useNow } from '@/lib/use-now'
@@ -63,25 +63,30 @@ export function ApplicantStatusPage() {
 
   const applicationQuery = useQuery({
     queryKey: ['applicant', 'application', id],
-    queryFn: () => adminApi.getApplication(id),
+    // /me scope: the API returns 404 for any application the caller does
+    // not own, which the page renders as "not found" (BR-08).
+    queryFn: () => publicApi.myApplication(id),
     enabled: Boolean(id),
+    retry: false,
   })
 
   const eventsQuery = useQuery({
     queryKey: ['applicant', 'application-events', id],
-    queryFn: () => adminApi.applicationEvents(id),
+    queryFn: () => publicApi.myApplicationEvents(id),
     enabled: Boolean(id),
+    retry: false,
   })
 
   const shortlistQuery = useQuery({
     queryKey: ['applicant', 'shortlist-message', id],
     queryFn: () => publicApi.shortlistMessageFor(id),
     enabled: Boolean(id),
+    retry: false,
   })
 
   const announcementsQuery = useQuery({
     queryKey: ['applicant', 'announcements', userId],
-    queryFn: () => publicApi.announcementsFor(userId),
+    queryFn: () => publicApi.announcementsFor(),
     enabled: Boolean(userId),
   })
 
@@ -505,7 +510,7 @@ function NextSteps({ status }: { status: ApplicationStatus }) {
   const content: Record<ApplicationStatus, { title: string; body: string }> = {
     pending: {
       title: 'We are reviewing your application',
-      body: 'Our recruitment team reviews every application in the order it was received. If you are shortlisted you will receive an email and SMS with your interview details.',
+      body: 'Our recruitment team reviews every application in the order it was received. If you are shortlisted you will receive an email with your interview details.',
     },
     shortlisted: {
       title: 'Attend your interview',
@@ -513,7 +518,7 @@ function NextSteps({ status }: { status: ApplicationStatus }) {
     },
     appointed: {
       title: 'Complete your onboarding',
-      body: 'An access code has been sent to your email and phone. Use it in the Staff Portal to complete your staff details — your Staff ID is issued at the end of that form.',
+      body: 'The recruitment team will hand you an access code. Use it in the Staff Portal to complete your staff details — your Staff ID is issued at the end of that form.',
     },
     rejected: {
       title: 'Keep an eye out for other roles',

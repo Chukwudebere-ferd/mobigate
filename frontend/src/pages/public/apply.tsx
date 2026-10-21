@@ -26,25 +26,24 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { EmptyState, Spinner } from '@/components/ui/empty-state'
-import { Field, Input, Select, Textarea } from '@/components/ui/input'
+import { Checkbox, Field, Input, Select, Textarea } from '@/components/ui/input'
 import { EmploymentCategoryBadge } from '@/components/ui/status-badges'
-import { childrenOf, descendantsOf, locationPath, publicApi } from '@/lib/api'
+import {
+  locationPath,
+  publicApi,
+  sortLocationsByName,
+} from '@/lib/api'
+import { ApiError } from '@/lib/api/client'
 import { formatBytes, formatDate, untilNow } from '@/lib/format'
+import { useSession } from '@/providers/session-provider'
 
-const MAX_CV_BYTES = 5 * 1024 * 1024
 const MAX_PHOTO_BYTES = 2 * 1024 * 1024
-const CV_EXTENSIONS = /\.(pdf|doc|docx)$/i
 const PHOTO_EXTENSIONS = /\.(png|jpe?g|webp)$/i
 
 const applicationSchema = z
   .object({
     first_name: z.string().trim().min(1, 'First name is required'),
     last_name: z.string().trim().min(1, 'Last name is required'),
-    email: z
-      .string()
-      .trim()
-      .min(1, 'Email address is required')
-      .pipe(z.email('Enter a valid email address')),
     phone: z
       .string()
       .trim()
@@ -61,41 +60,26 @@ const applicationSchema = z
           !Number.isNaN(Date.parse(value)) && new Date(value) < new Date(),
         'Enter a valid date of birth',
       ),
-    country_id: z.string().min(1, 'Select a country'),
     state_id: z.string().min(1, 'Select a state'),
     lga_id: z.string().min(1, 'Select an LGA'),
-    city_id: z.string().min(1, 'Select a city or town'),
+    town: z.string().trim().max(120).optional(),
     address_line: z.string().trim().min(3, 'Enter your residential address'),
     qualification: z
       .string()
       .trim()
       .min(2, 'Enter your highest qualification'),
-    cv: z.custom<File | undefined>(
-      (value) => value instanceof File,
-      'Attach your CV',
-    ),
     photo: z.custom<File | undefined>(
       (value) => value instanceof File,
       'Attach a passport photograph',
     ),
+    consent: z
+      .boolean()
+      .refine(
+        (value) => value,
+        'Confirm that you agree to the data processing notice',
+      ),
   })
   .superRefine((values, ctx) => {
-    if (values.cv) {
-      if (values.cv.size > MAX_CV_BYTES) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['cv'],
-          message: 'CV must be 5 MB or smaller',
-        })
-      }
-      if (!CV_EXTENSIONS.test(values.cv.name)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['cv'],
-          message: 'Attach a PDF or Word document',
-        })
-      }
-    }
     if (values.photo) {
       if (values.photo.size > MAX_PHOTO_BYTES) {
         ctx.addIssue({
@@ -121,6 +105,9 @@ const GENDER_OPTIONS = ['Male', 'Female', 'Other'] as const
 export function ApplyPage() {
   const { slug } = useParams<{ slug: string }>()
   const navigate = useNavigate()
+  // Register-before-apply (BR-09): the form is only offered to a signed-in
+  // account, and the email is taken from that session — never the form.
+  const { session, isLoading: sessionLoading } = useSession()
 
   const {
     data: job,
@@ -136,20 +123,18 @@ export function ApplyPage() {
     resolver: zodResolver(applicationSchema),
     mode: 'onTouched',
     defaultValues: {
-      first_name: '',
-      last_name: '',
-      email: '',
+      first_name: session?.user.first_name ?? '',
+      last_name: session?.user.last_name ?? '',
       phone: '',
       gender: 'Male',
       date_of_birth: '',
-      country_id: '',
       state_id: '',
       lga_id: '',
-      city_id: '',
+      town: '',
       address_line: '',
       qualification: '',
-      cv: undefined,
       photo: undefined,
+      consent: false,
     },
   })
 
@@ -160,37 +145,33 @@ export function ApplyPage() {
     formState: { errors, isSubmitting },
   } = form
 
-  const countryId = useWatch({ control, name: 'country_id' })
   const stateId = useWatch({ control, name: 'state_id' })
-  const lgaId = useWatch({ control, name: 'lga_id' })
-  const cvValue = useWatch({ control, name: 'cv' })
   const photoValue = useWatch({ control, name: 'photo' })
 
-  const countries = React.useMemo(
-    () => childrenOf(null).filter((item) => item.type === 'country'),
-    [],
-  )
-  const states = React.useMemo(
-    () =>
-      countryId
-        ? childrenOf(countryId).filter((item) => item.type === 'state')
-        : [],
-    [countryId],
-  )
-  const lgas = React.useMemo(
-    () =>
-      stateId ? childrenOf(stateId).filter((item) => item.type === 'lga') : [],
-    [stateId],
-  )
-  const cities = React.useMemo(
-    () =>
-      lgaId
-        ? descendantsOf(lgaId).filter(
-            (item) => item.type === 'city' || item.type === 'town',
-          )
-        : [],
-    [lgaId],
-  )
+  const locationsQuery = useQuery({
+    queryKey: ['public', 'locations'],
+    queryFn: () => publicApi.listLocations(),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const locationItems = locationsQuery.data
+  const country = locationItems?.find((item) => item.type === 'country')
+  const states = React.useMemo(() => {
+    if (!locationItems || !country) return []
+    return sortLocationsByName(
+      locationItems.filter(
+        (item) => item.type === 'state' && item.parent_id === country.id,
+      ),
+    )
+  }, [country, locationItems])
+  const lgas = React.useMemo(() => {
+    if (!locationItems || !stateId) return []
+    return sortLocationsByName(
+      locationItems.filter(
+        (item) => item.type === 'lga' && item.parent_id === stateId,
+      ),
+    )
+  }, [locationItems, stateId])
 
   const mutation = useMutation({
     mutationFn: publicApi.submitApplication,
@@ -199,6 +180,14 @@ export function ApplyPage() {
       navigate('/application/received', { state: { application } })
     },
     onError: (error: unknown) => {
+      // 409 is the server's duplicate guard (BR-09): one open application
+      // per role.
+      if (error instanceof ApiError && error.status === 409) {
+        toast.error(
+          'You already have an open application for this role. Track it from your portal.',
+        )
+        return
+      }
       toast.error(
         error instanceof Error
           ? error.message
@@ -213,20 +202,61 @@ export function ApplyPage() {
       job_id: job.id,
       first_name: values.first_name,
       last_name: values.last_name,
-      email: values.email,
       phone: values.phone,
-      gender: values.gender,
+      gender: values.gender.toLowerCase(),
       date_of_birth: values.date_of_birth,
-      location_id: values.city_id || values.lga_id || values.state_id,
-      address_line: values.address_line,
+      location_id: values.lga_id,
+      address_line: values.town
+        ? `${values.town}, ${values.address_line}`
+        : values.address_line,
       qualification: values.qualification,
+      consent: values.consent,
+      photo: values.photo,
     })
   })
 
-  if (jobLoading) {
+  if (sessionLoading || jobLoading) {
     return (
       <div className="bg-ink-50">
         <Spinner />
+      </div>
+    )
+  }
+
+  // Register-before-apply: an anonymous visitor is pointed at the account
+  // pages instead of a form they could not submit anyway.
+  if (!session) {
+    return (
+      <div className="bg-ink-50">
+        <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+          <Card>
+            <EmptyState
+              icon={Lock}
+              title="Create an account to apply"
+              description={
+                job
+                  ? `Applying for ${job.title} requires an account — it keeps your applications and their status in one place.`
+                  : 'Applying for a role requires an account — it keeps your applications and their status in one place.'
+              }
+              action={
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <Link
+                    to="/signup"
+                    className={buttonVariants({ variant: 'primary' })}
+                  >
+                    Create an account
+                  </Link>
+                  <Link
+                    to={`/login?next=${encodeURIComponent(`/apply/${slug ?? ''}`)}`}
+                    className={buttonVariants({ variant: 'outline' })}
+                  >
+                    I already have an account
+                  </Link>
+                </div>
+              }
+            />
+          </Card>
+        </div>
       </div>
     )
   }
@@ -325,14 +355,14 @@ export function ApplyPage() {
                 label="Email address"
                 htmlFor="email"
                 required
-                error={errors.email?.message}
+                hint="Taken from your account. Applications are tied to it."
               >
                 <Input
                   id="email"
                   type="email"
-                  autoComplete="email"
-                  invalid={Boolean(errors.email)}
-                  {...form.register('email')}
+                  value={session.user.email}
+                  readOnly
+                  aria-readonly
                 />
               </Field>
 
@@ -401,38 +431,12 @@ export function ApplyPage() {
               <CardDescription>Where you currently live.</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <Field
-                label="Country"
-                htmlFor="country_id"
-                required
-                error={errors.country_id?.message}
-              >
-                <Controller
-                  control={control}
-                  name="country_id"
-                  render={({ field }) => (
-                    <Select
-                      id="country_id"
-                      name={field.name}
-                      ref={field.ref}
-                      value={field.value}
-                      onBlur={field.onBlur}
-                      onChange={(event) => {
-                        field.onChange(event.target.value)
-                        setValue('state_id', '')
-                        setValue('lga_id', '')
-                        setValue('city_id', '')
-                      }}
-                      invalid={Boolean(errors.country_id)}
-                    >
-                      <option value="">Select a country</option>
-                      {countries.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
+              <Field label="Country" htmlFor="country" required>
+                <Input
+                  id="country"
+                  value={country?.name ?? 'Nigeria'}
+                  readOnly
+                  aria-readonly
                 />
               </Field>
 
@@ -452,18 +456,21 @@ export function ApplyPage() {
                       ref={field.ref}
                       value={field.value}
                       onBlur={field.onBlur}
-                      disabled={!countryId}
+                      disabled={locationsQuery.isLoading || states.length === 0}
                       onChange={(event) => {
                         field.onChange(event.target.value)
                         setValue('lga_id', '')
-                        setValue('city_id', '')
                       }}
                       invalid={Boolean(errors.state_id)}
                     >
-                      <option value="">Select a state</option>
-                      {states.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
+                      <option value="">
+                        {locationsQuery.isLoading
+                          ? 'Loading states…'
+                          : 'Select a state'}
+                      </option>
+                      {states.map((state) => (
+                        <option key={state.id} value={state.id}>
+                          {state.name}
                         </option>
                       ))}
                     </Select>
@@ -487,17 +494,16 @@ export function ApplyPage() {
                       ref={field.ref}
                       value={field.value}
                       onBlur={field.onBlur}
-                      disabled={!stateId}
-                      onChange={(event) => {
-                        field.onChange(event.target.value)
-                        setValue('city_id', '')
-                      }}
+                      disabled={!stateId || lgas.length === 0}
+                      onChange={(event) => field.onChange(event.target.value)}
                       invalid={Boolean(errors.lga_id)}
                     >
-                      <option value="">Select an LGA</option>
-                      {lgas.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
+                      <option value="">
+                        {stateId ? 'Select an LGA' : 'Select a state first'}
+                      </option>
+                      {lgas.map((lga) => (
+                        <option key={lga.id} value={lga.id}>
+                          {lga.name}
                         </option>
                       ))}
                     </Select>
@@ -507,32 +513,16 @@ export function ApplyPage() {
 
               <Field
                 label="City / town"
-                htmlFor="city_id"
-                required
-                error={errors.city_id?.message}
+                htmlFor="town"
+                error={errors.town?.message}
+                hint="Optional. Added to your residential address."
               >
-                <Controller
-                  control={control}
-                  name="city_id"
-                  render={({ field }) => (
-                    <Select
-                      id="city_id"
-                      name={field.name}
-                      ref={field.ref}
-                      value={field.value}
-                      onBlur={field.onBlur}
-                      disabled={!lgaId}
-                      onChange={(event) => field.onChange(event.target.value)}
-                      invalid={Boolean(errors.city_id)}
-                    >
-                      <option value="">Select a city or town</option>
-                      {cities.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
+                <Input
+                  id="town"
+                  autoComplete="address-level2"
+                  placeholder="e.g. Ikeja"
+                  invalid={Boolean(errors.town)}
+                  {...form.register('town')}
                 />
               </Field>
 
@@ -552,6 +542,16 @@ export function ApplyPage() {
                   {...form.register('address_line')}
                 />
               </Field>
+
+              {locationsQuery.isError && (
+                <p
+                  className="text-sm text-danger-600 sm:col-span-2"
+                  role="alert"
+                >
+                  We could not load the location list. Refresh the page and try
+                  again.
+                </p>
+              )}
             </CardContent>
           </Card>
 
@@ -562,10 +562,10 @@ export function ApplyPage() {
                 <span className="flex size-6 items-center justify-center rounded-md bg-brand-50 text-xs font-semibold text-brand-700">
                   3
                 </span>
-                Qualification &amp; documents
+                Qualification &amp; photograph
               </CardTitle>
               <CardDescription>
-                Your highest qualification and supporting files.
+                Your highest qualification and a passport photograph.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -583,51 +583,27 @@ export function ApplyPage() {
                 />
               </Field>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <Field
-                  label="Curriculum vitae"
-                  htmlFor="cv"
-                  required
-                  error={errors.cv?.message}
-                >
-                  <FileDropzone
-                    id="cv"
-                    icon={FileUp}
-                    title="Upload your CV"
-                    hint="PDF, DOC or DOCX — up to 5 MB"
-                    accept="pdf,.doc,.docx"
-                    file={cvValue}
-                    onSelect={(file) =>
-                      setValue('cv', file, { shouldValidate: true })
-                    }
-                    onClear={() =>
-                      setValue('cv', undefined, { shouldValidate: true })
-                    }
-                  />
-                </Field>
-
-                <Field
-                  label="Passport photograph"
-                  htmlFor="photo"
-                  required
-                  error={errors.photo?.message}
-                >
-                  <FileDropzone
-                    id="photo"
-                    icon={ImageIcon}
-                    title="Upload a photograph"
-                    hint="PNG, JPG or WEBP — up to 2 MB"
-                    accept="image/png,image/jpeg,image/webp"
-                    file={photoValue}
-                    onSelect={(file) =>
-                      setValue('photo', file, { shouldValidate: true })
-                    }
-                    onClear={() =>
-                      setValue('photo', undefined, { shouldValidate: true })
-                    }
-                  />
-                </Field>
-              </div>
+              <Field
+                label="Passport photograph"
+                htmlFor="photo"
+                required
+                error={errors.photo?.message}
+              >
+                <FileDropzone
+                  id="photo"
+                  icon={ImageIcon}
+                  title="Upload a photograph"
+                  hint="PNG, JPG or WEBP — up to 2 MB"
+                  accept="image/png,image/jpeg,image/webp"
+                  file={photoValue}
+                  onSelect={(file) =>
+                    setValue('photo', file, { shouldValidate: true })
+                  }
+                  onClear={() =>
+                    setValue('photo', undefined, { shouldValidate: true })
+                  }
+                />
+              </Field>
             </CardContent>
           </Card>
 
@@ -691,7 +667,7 @@ export function ApplyPage() {
 
           {/* -- Submit -- */}
           <Card>
-            <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <CardContent className="space-y-4 p-5">
               <div className="flex gap-2.5 text-xs text-ink-500">
                 <ShieldCheck
                   aria-hidden
@@ -703,15 +679,32 @@ export function ApplyPage() {
                   outside Mobigate Group without your consent.
                 </p>
               </div>
-              <Button
-                type="submit"
-                size="lg"
-                loading={mutation.isPending || isSubmitting}
-                loadingText="Submitting…"
-                className="shrink-0"
-              >
-                Submit application
-              </Button>
+
+              <div>
+                <Checkbox
+                  id="consent"
+                  label="I agree to Mobigate Group processing my personal data for this recruitment exercise."
+                  description="This includes my contact details, qualifications and uploaded documents. I can request access or erasure after the retention period."
+                  {...form.register('consent')}
+                />
+                {errors.consent?.message ? (
+                  <p className="mt-1.5 text-xs text-danger-600">
+                    {errors.consent.message}
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="flex justify-end">
+                <Button
+                  type="submit"
+                  size="lg"
+                  loading={mutation.isPending || isSubmitting}
+                  loadingText="Submitting…"
+                  className="w-full shrink-0 sm:w-auto"
+                >
+                  Submit application
+                </Button>
+              </div>
             </CardContent>
           </Card>
 

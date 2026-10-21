@@ -25,6 +25,10 @@ var (
 
 	// ErrValidation is returned when cross-field business rules fail.
 	ErrValidation = errors.New("validation failed")
+
+	// ErrLocked is returned when an access code has exhausted its failed
+	// attempts (BR-06) and requires admin reissue.
+	ErrLocked = errors.New("code locked")
 )
 
 // Store wraps the connection pool.

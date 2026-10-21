@@ -2,9 +2,13 @@
  * The product visual on the public landing page.
  *
  * These views are not screenshots. Each one is assembled from the real
- * interface components — StatCard, Table, the status badges — driven by the
- * real seed data, so the page always shows the product as it actually
- * renders and stays in step with it as the product changes.
+ * interface components — StatCard, Table, the status badges — so the page
+ * always shows the product as it actually renders and stays in step with
+ * it as the product changes.
+ *
+ * The records behind the views are frozen fictional stand-ins: the landing
+ * page never renders production data (privacy). Timestamps drift with page
+ * load so the walkthrough always reads as current.
  *
  * The staff view deliberately omits bank details, guarantor and next of kin.
  * Those are restricted to the record owner and administrators (README M10),
@@ -30,13 +34,89 @@ import {
 } from '@/components/ui/table'
 import { cn } from '@/lib/cn'
 import { formatDate, fullName, relativeTime } from '@/lib/format'
-import {
-  applicationEvents,
-  applications,
-  dashboardMetrics,
-  shortlists,
-  staffProfiles,
-} from '@/mocks/seed'
+
+const DEMO = {
+  metrics: {
+    total_applications: 1284,
+    shortlisted: 96,
+    appointed: 41,
+    total_staff: 214,
+  },
+  recentApplications: [
+    {
+      id: 'a1',
+      application_number: 'APP/LA/2026/0042',
+      first_name: 'Ngozi',
+      last_name: 'Obi',
+      job_title: 'Senior Backend Engineer',
+      status: 'shortlisted' as const,
+    },
+    {
+      id: 'a2',
+      application_number: 'APP/LA/2026/0043',
+      first_name: 'Tunde',
+      last_name: 'Adebisi',
+      job_title: 'Frontend Engineer',
+      status: 'pending' as const,
+    },
+    {
+      id: 'a3',
+      application_number: 'APP/LA/2026/0044',
+      first_name: 'Aisha',
+      last_name: 'Bello',
+      job_title: 'Operations Officer',
+      status: 'pending' as const,
+    },
+    {
+      id: 'a4',
+      application_number: 'APP/LA/2026/0045',
+      first_name: 'Sadiq',
+      last_name: 'Yusuf',
+      job_title: 'Facilities Manager',
+      status: 'rejected' as const,
+    },
+  ],
+  applicant: {
+    application_number: 'APP/LA/2026/0042',
+    first_name: 'Ngozi',
+    last_name: 'Obi',
+    job_title: 'Senior Backend Engineer',
+    status: 'shortlisted' as const,
+  },
+  events: [
+    {
+      id: 'e1',
+      reason: 'Shortlisted for interview — CV matches the role requirements.',
+      actor_name: 'Aisha Adeyemi',
+      created_at: new Date(Date.now() - 3 * 3600_000).toISOString(),
+    },
+    {
+      id: 'e2',
+      reason: 'Application received and queued for review.',
+      actor_name: 'Recruitment pipeline',
+      created_at: new Date(Date.now() - 30 * 3600_000).toISOString(),
+    },
+    {
+      id: 'e3',
+      reason: 'Application submitted through the careers portal.',
+      actor_name: 'Ngozi Obi',
+      created_at: new Date(Date.now() - 52 * 3600_000).toISOString(),
+    },
+  ],
+  shortlistMessage:
+    'Dear Ngozi, congratulations — you have been shortlisted for the Senior Backend Engineer role. Report to the Human Resources office on Monday by 9:00 AM for your interview.',
+  staff: {
+    staff_id: 'STA/LA/2026/0007',
+    status: 'active' as const,
+    first_name: 'Aisha',
+    last_name: 'Bello',
+    position: 'Operations Officer',
+    department_name: 'Operations',
+    location_name: 'Lagos › Ikeja',
+    appointment_date: '2026-08-17T00:00:00Z',
+    employment_category: 'employee' as const,
+  },
+}
 
 const VIEWS = [
   { key: 'applicant', label: 'Applicant portal', route: '/applicant' },
@@ -102,32 +182,32 @@ export function ProductVisual({ className }: { className?: string }) {
 /* -- Hiring pipeline (public-safe: counts + recent movement, no admin chrome) -- */
 
 function PipelineView() {
-  const recent = applications.slice(0, 4)
+  const recent = DEMO.recentApplications
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <StatCard
           label="Applications"
-          value={dashboardMetrics.total_applications}
+          value={DEMO.metrics.total_applications}
           tone="brand"
           icon={FileStack}
         />
         <StatCard
           label="Shortlisted"
-          value={dashboardMetrics.shortlisted}
+          value={DEMO.metrics.shortlisted}
           tone="info"
           icon={BadgeCheck}
         />
         <StatCard
           label="Appointed"
-          value={dashboardMetrics.appointed}
+          value={DEMO.metrics.appointed}
           tone="success"
           icon={UserCheck}
         />
         <StatCard
           label="Staff"
-          value={dashboardMetrics.total_staff}
+          value={DEMO.metrics.total_staff}
           tone="accent"
           icon={Users}
         />
@@ -171,16 +251,9 @@ function PipelineView() {
 /* -- Applicant portal ----------------------------------------------------- */
 
 function ApplicantView() {
-  const application = applications.find((item) => item.id === 'app-2')
-  const shortlist = shortlists.find((item) => item.application_id === 'app-2')
-  const events = applicationEvents
-    .filter(
-      (event) =>
-        event.application_id === 'app-2' && event.to_status !== 'appointed',
-    )
-    .slice(0, 3)
-
-  if (!application) return null
+  const application = DEMO.applicant
+  const shortlist = { message: DEMO.shortlistMessage }
+  const events = DEMO.events
 
   return (
     <div className="space-y-4">
@@ -245,8 +318,7 @@ function ApplicantView() {
 /* -- Staff record --------------------------------------------------------- */
 
 function StaffView() {
-  const staff = staffProfiles[0]
-  if (!staff) return null
+  const staff = DEMO.staff
 
   return (
     <div className="space-y-4">

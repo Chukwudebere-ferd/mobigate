@@ -41,6 +41,18 @@ type Context struct {
 	User User
 }
 
+// Identity is the Better Auth payload for a session that has not yet been
+// matched to a domain users row. It carries no approval status and grants
+// no authorisation on its own.
+type Identity struct {
+	ID        string
+	Email     string
+	Name      string
+	Role      models.UserRole
+	TenantID  string
+	StaffID   string
+}
+
 // UserStore loads the domain profile behind an authenticated identity.
 type UserStore interface {
 	UserByID(ctx context.Context, id string) (models.User, error)
@@ -64,6 +76,7 @@ type sessionResponse struct {
 	User struct {
 		ID        string  `json:"id"`
 		Email     string  `json:"email"`
+		Name      string  `json:"name"`
 		FirstName string  `json:"firstName"`
 		LastName  string  `json:"lastName"`
 		Role      string  `json:"role"`
@@ -76,14 +89,13 @@ type sessionResponse struct {
 	} `json:"session"`
 }
 
-// Verify resolves the session cookie on the request.
-//
-// It returns ErrUnauthenticated when the cookie is missing, expired, or
-// points at a session that does not exist.
-func (v *Verifier) Verify(r *http.Request) (Context, error) {
+// VerifyIdentity resolves the session cookie to the Better Auth identity
+// without loading the domain profile. It backs the applicant provisioning
+// endpoint, which runs precisely when no domain users row exists yet.
+func (v *Verifier) VerifyIdentity(r *http.Request) (Identity, error) {
 	cookie, err := r.Cookie(v.cookieName(r))
 	if err != nil {
-		return Context{}, ErrUnauthenticated
+		return Identity{}, ErrUnauthenticated
 	}
 
 	req, err := http.NewRequestWithContext(
@@ -93,33 +105,58 @@ func (v *Verifier) Verify(r *http.Request) (Context, error) {
 		nil,
 	)
 	if err != nil {
-		return Context{}, fmt.Errorf("build session request: %w", err)
+		return Identity{}, fmt.Errorf("build session request: %w", err)
 	}
 	req.Header.Set("Cookie", cookie.Name+"="+cookie.Value)
 
 	resp, err := v.client().Do(req)
 	if err != nil {
-		return Context{}, fmt.Errorf("session lookup: %w", err)
+		return Identity{}, fmt.Errorf("session lookup: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusNotFound {
-		return Context{}, ErrUnauthenticated
+		return Identity{}, ErrUnauthenticated
 	}
 	if resp.StatusCode != http.StatusOK {
-		return Context{}, fmt.Errorf("session lookup: unexpected status %d", resp.StatusCode)
+		return Identity{}, fmt.Errorf("session lookup: unexpected status %d", resp.StatusCode)
 	}
 
 	var payload sessionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return Context{}, fmt.Errorf("decode session: %w", err)
+		return Identity{}, fmt.Errorf("decode session: %w", err)
 	}
 	if payload.User.ID == "" {
-		return Context{}, ErrUnauthenticated
+		return Identity{}, ErrUnauthenticated
+	}
+
+	identity := Identity{
+		ID:        payload.User.ID,
+		Email:     payload.User.Email,
+		Name:      strings.TrimSpace(payload.User.Name),
+		Role:      models.UserRole(payload.User.Role),
+	}
+	if payload.User.TenantID != nil {
+		identity.TenantID = *payload.User.TenantID
+	}
+	if payload.User.StaffID != nil {
+		identity.StaffID = *payload.User.StaffID
+	}
+	return identity, nil
+}
+
+// Verify resolves the session cookie on the request.
+//
+// It returns ErrUnauthenticated when the cookie is missing, expired, or
+// points at a session that does not exist.
+func (v *Verifier) Verify(r *http.Request) (Context, error) {
+	identity, err := v.VerifyIdentity(r)
+	if err != nil {
+		return Context{}, err
 	}
 
 	if v.Users != nil {
-		domainUser, err := v.Users.UserByID(r.Context(), payload.User.ID)
+		domainUser, err := v.Users.UserByID(r.Context(), identity.ID)
 		if errors.Is(err, store.ErrNotFound) {
 			return Context{}, ErrUnauthenticated
 		}
@@ -137,20 +174,26 @@ func (v *Verifier) Verify(r *http.Request) (Context, error) {
 		}}, nil
 	}
 
+	// Development fallback without a users store: the payload supplies the
+	// identity, and the split name fields keep older payloads working.
+	firstName, lastName := identity.Name, ""
+	if idx := strings.IndexAny(identity.Name, " \t"); idx > 0 {
+		firstName, lastName = identity.Name[:idx], strings.TrimSpace(identity.Name[idx+1:])
+	}
 	ctx := Context{
 		User: User{
-			ID:        payload.User.ID,
-			Email:     payload.User.Email,
-			FirstName: payload.User.FirstName,
-			LastName:  payload.User.LastName,
-			Role:      models.UserRole(payload.User.Role),
+			ID:        identity.ID,
+			Email:     identity.Email,
+			FirstName: firstName,
+			LastName:  lastName,
+			Role:      identity.Role,
 		},
 	}
-	if payload.User.TenantID != nil {
-		ctx.User.TenantID = *payload.User.TenantID
+	if identity.TenantID != "" {
+		ctx.User.TenantID = identity.TenantID
 	}
-	if payload.User.StaffID != nil {
-		ctx.User.StaffID = *payload.User.StaffID
+	if identity.StaffID != "" {
+		ctx.User.StaffID = identity.StaffID
 	}
 	return ctx, nil
 }

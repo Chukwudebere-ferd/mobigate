@@ -21,6 +21,7 @@ schema are in place; the persistence layer and handler bodies land next.
 | `migrations/0002_seed.sql` | Reference tenants, locations and templates |
 | `migrations/0003_better_auth.sql` | Better Auth identity tables |
 | `migrations/0004_admin_settings.sql` | Group-wide access-code settings |
+| `migrations/0005_application_consent.sql` | NDPA consent timestamp and notice version |
 
 ## Running
 
@@ -114,7 +115,7 @@ through `frontend/src/lib/api/index.ts`.
 | `GET` | `/admin/staff/{id}` | One staff record |
 | `GET`/`POST` | `/admin/locations` | Tree / create |
 | `PATCH` | `/admin/locations/{id}` | Approve |
-| `GET` | `/admin/departments` | Departments |
+| `GET`/`POST` | `/admin/departments` | List / ensure department by name |
 | `GET` | `/admin/users` | Users and admins |
 | `PATCH` | `/admin/users/{id}` | Approve admin |
 | `GET` | `/admin/templates` | Message templates |

@@ -15,6 +15,7 @@ import (
 
 	"github.com/mobigate/mgm-portal/internal/auth"
 	"github.com/mobigate/mgm-portal/internal/models"
+	"github.com/mobigate/mgm-portal/internal/storage"
 	"github.com/mobigate/mgm-portal/internal/store"
 )
 
@@ -30,6 +31,20 @@ type Handler struct {
 	// AuthBaseURL is the Better Auth service used for identity operations
 	// that must stay inside Better Auth (password changes, account creation).
 	AuthBaseURL string
+	// ApplicationLimiter protects public application submission from bursts
+	// and simple spam. Nil disables limiting, which is useful in tests.
+	ApplicationLimiter *ApplicationLimiter
+
+	// Storage persists uploaded photos and staff documents in Byteship.
+	// Upload routes fail closed when it is nil.
+	Storage *storage.Store
+	// TicketSecret signs the short-lived onboarding tickets handed out by
+	// code redemption. It should be derived from, but not equal to,
+	// AUTH_SECRET.
+	TicketSecret string
+	// redeemAttempts throttles code redemption per IP, the backstop against
+	// guessing before a code row exists to lock (BR-06).
+	redeemAttempts *attemptLimiter
 }
 
 // Register mounts every MVP route on the given router.
@@ -44,7 +59,10 @@ func (h *Handler) Register(r chi.Router) {
 	r.Route("/public", func(r chi.Router) {
 		r.Get("/jobs", h.listPublicJobs)
 		r.Get("/jobs/{slug}", h.getPublicJob)
-		r.Post("/applications", h.submitApplication)
+		r.Get("/locations", h.publicLocations)
+		r.Get("/departments", h.publicDepartments)
+		r.Post("/provision", h.provisionApplicant)
+		r.With(h.ApplicationLimiter.Middleware).Post("/applications", h.submitApplication)
 	})
 
 	r.Route("/me", func(r chi.Router) {
@@ -52,14 +70,21 @@ func (h *Handler) Register(r chi.Router) {
 		r.Get("/", h.currentUser)
 		r.Get("/applications", h.myApplications)
 		r.Get("/applications/{id}", h.myApplication)
+		r.Get("/applications/{id}/events", h.myApplicationEvents)
+		r.Patch("/applications/{id}", h.editMyApplication)
+		r.Post("/applications/{id}/withdraw", h.withdrawMyApplication)
 		r.Get("/applications/{id}/shortlist", h.myShortlistMessage)
+		r.Get("/applications/{id}/photo", h.myApplicationPhoto)
 		r.Get("/interviews", h.myInterviews)
 	})
 
 	r.Route("/staff", func(r chi.Router) {
 		h.require(models.RoleApplicant, models.RoleStaff, models.RoleAdmin, models.RoleSuperAdmin)(r)
 		r.Post("/redeem", h.redeemAccessCode)
+		r.Get("/onboarding/draft", h.getOnboardingDraft)
+		r.Put("/onboarding/draft", h.saveOnboardingDraft)
 		r.Post("/onboarding", h.completeOnboarding)
+		r.Get("/me", h.staffMe)
 	})
 
 	r.Route("/admin", func(r chi.Router) {
@@ -164,6 +189,7 @@ func (h *Handler) registerAdminRoutes(r chi.Router) {
 	r.Patch("/locations/{id}", h.approveLocation)
 
 	r.Get("/departments", h.listDepartments)
+	r.Post("/departments", h.createDepartment)
 	r.Get("/users", h.listUsers)
 	r.Post("/users", h.createAdminUser)
 	r.Patch("/users/{id}", h.updateUser)
@@ -176,29 +202,8 @@ func (h *Handler) registerAdminRoutes(r chi.Router) {
 }
 
 // -- Handlers --------------------------------------------------------------
-// Bodies are written here as thin adapters over the store. The store
-// implementation lands with the persistence layer; these signatures define
-// the contract the frontend already depends on.
-
-func (h *Handler) listPublicJobs(w http.ResponseWriter, r *http.Request) {
-	// GET /public/jobs -> 200 { "items": Job[] }
-	// Only jobs with status = 'published' are returned.
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.Job{}})
-}
-
-func (h *Handler) getPublicJob(w http.ResponseWriter, r *http.Request) {
-	// GET /public/jobs/{slug} -> 200 Job | 404
-	writeJSON(w, http.StatusOK, models.Job{})
-}
-
-func (h *Handler) submitApplication(w http.ResponseWriter, r *http.Request) {
-	// POST /public/applications
-	// Body: job_id, first_name, last_name, email, phone, gender,
-	//       date_of_birth, location_id, address_line, qualification
-	// 201 -> Application (includes the generated application_number)
-	// 409 -> a duplicate application for the same job and email
-	writeJSON(w, http.StatusCreated, models.Application{})
-}
+// Candidate-facing handlers (public careers, /me, staff onboarding) live in
+// public.go and staff.go; only admin handlers remain in this file.
 
 // adminScope resolves the tenant filter for an admin request. A nil UUID
 // means "all tenants" and is reserved for Super Admins; a state Admin must
@@ -237,7 +242,13 @@ func (h *Handler) currentUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
+	h.writeCurrentUser(w, r, session)
+}
 
+// writeCurrentUser renders the /me payload for a resolved session. Shared
+// with applicant provisioning, whose first /me response is built from the
+// freshly created domain row.
+func (h *Handler) writeCurrentUser(w http.ResponseWriter, r *http.Request, session auth.Context) {
 	user := map[string]any{
 		"id":         session.User.ID,
 		"email":      session.User.Email,
@@ -266,49 +277,6 @@ func (h *Handler) currentUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, payload)
-}
-
-func (h *Handler) myApplications(w http.ResponseWriter, r *http.Request) {
-	// GET /me/applications -> 200 { "items": Application[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.Application{}})
-}
-
-func (h *Handler) myApplication(w http.ResponseWriter, r *http.Request) {
-	// GET /me/applications/{id} -> 200 Application | 404
-	writeJSON(w, http.StatusOK, models.Application{})
-}
-
-func (h *Handler) myShortlistMessage(w http.ResponseWriter, r *http.Request) {
-	// GET /me/applications/{id}/shortlist
-	// 200 -> Shortlist (the confirmation message, verbatim)
-	// 404 -> when the application is not shortlisted, or the shortlist was
-	//        revoked. The message is never returned to a non-shortlisted
-	//        applicant (BR-08).
-	writeJSON(w, http.StatusOK, models.Shortlist{})
-}
-
-func (h *Handler) myInterviews(w http.ResponseWriter, r *http.Request) {
-	// GET /me/interviews -> 200 { "items": InterviewAnnouncement[] }
-	writeJSON(w, http.StatusOK, map[string]any{"items": []models.InterviewAnnouncement{}})
-}
-
-func (h *Handler) redeemAccessCode(w http.ResponseWriter, r *http.Request) {
-	// POST /staff/redeem  Body: { code }
-	// 200 -> { "application": Application }
-	// 400 -> unknown, expired, used or revoked code, or too many failures
-	//
-	// The code is compared against its stored hash. On success the attempt
-	// counter resets; on failure it increments, and 5 failures lock the code
-	// (BR-06).
-	writeJSON(w, http.StatusOK, map[string]any{"application": models.Application{}})
-}
-
-func (h *Handler) completeOnboarding(w http.ResponseWriter, r *http.Request) {
-	// POST /staff/onboarding
-	// Creates the staff profile, allocates the Staff ID, consumes the access
-	// code and writes the audit entry in ONE transaction (BR-11).
-	// 201 -> { "staff": StaffProfile }
-	writeJSON(w, http.StatusCreated, map[string]any{"staff": models.StaffProfile{}})
 }
 
 func (h *Handler) dashboard(w http.ResponseWriter, r *http.Request) {

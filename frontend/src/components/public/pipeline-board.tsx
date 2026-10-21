@@ -4,15 +4,48 @@ import { Avatar } from '@/components/ui/avatar'
 import { ApplicationStatusBadge } from '@/components/ui/status-badges'
 import { cn } from '@/lib/cn'
 import { formatTime, fullName } from '@/lib/format'
-import {
-  accessCodes,
-  applications,
-  interviews,
-  shortlists,
-  staffProfiles,
-} from '@/mocks/seed'
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] as const
+
+/**
+ * Frozen demo data for the marketing board. The landing page never shows
+ * real candidates (privacy), so these fictional records keep the visual
+ * rich without touching production data. The interview time drifts with
+ * page load so the board always reads as current.
+ */
+const DEMO_QUEUE = [
+  {
+    id: 'q1',
+    status: 'pending' as const,
+    first_name: 'Ngozi',
+    last_name: 'Obi',
+    job_title: 'Senior Backend Engineer',
+    application_number: 'APP/LA/2026/0042',
+  },
+  {
+    id: 'q2',
+    status: 'shortlisted' as const,
+    first_name: 'Tunde',
+    last_name: 'Adebisi',
+    job_title: 'Frontend Engineer',
+    application_number: 'APP/LA/2026/0043',
+  },
+  {
+    id: 'q3',
+    status: 'pending' as const,
+    first_name: 'Sadiq',
+    last_name: 'Yusuf',
+    job_title: 'Operations Officer',
+    application_number: 'APP/LA/2026/0044',
+  },
+]
+
+const DEMO_INTERVIEW_JOB = 'Senior Backend Engineer'
+const DEMO_SHORTLIST_NAME = 'Ngozi Obi'
+const DEMO_INTERVIEW_AT = new Date(Date.now() + 2 * 86_400_000).toISOString()
+const DEMO_APPOINTED_NAME = 'Chinedu Eze'
+const DEMO_CODE_HINT = '4Q9M'
+const DEMO_STAFF_ID = 'STA/LA/2026/0007'
 
 type BlockTone = 'brand' | 'info' | 'accent' | 'warning' | 'success' | 'deep'
 
@@ -31,96 +64,76 @@ interface BoardBlock {
 }
 
 export function PipelineBoard({ className }: { className?: string }) {
-  const queue = applications.slice(0, 3)
-  const interview = interviews.find((item) => item.id === 'int-1')
-  const shortlist = shortlists.find((item) => item.id === 'sl-1')
-  const appointed = applications.find((item) => item.status === 'appointed')
-  const code = accessCodes.find((item) => item.id === 'code-1')
-  const staff = staffProfiles[0]
+  const queue = DEMO_QUEUE
 
-  const blocks: BoardBlock[] = []
-
-  if (interview) {
-    blocks.push({
+  const blocks: BoardBlock[] = [
+    {
       id: 'interview',
       day: 0,
-      title: `${interview.job_title ?? 'Interview'} screening`,
+      title: `${DEMO_INTERVIEW_JOB} screening`,
       meta: '09:00 - 10:00',
       tone: 'brand',
       left: '2%',
       width: '17%',
       top: '4%',
       delay: '300ms',
-    })
-  }
-
-  if (shortlist) {
-    blocks.push({
+    },
+    {
       id: 'shortlist',
       day: 2,
-      title: shortlist.applicant_name ?? 'Shortlist & requirements',
-      meta: `Shortlisted · ${formatTime(interview?.interview_at)}`,
+      title: DEMO_SHORTLIST_NAME,
+      meta: `Shortlisted · ${formatTime(DEMO_INTERVIEW_AT)}`,
       tone: 'deep',
       left: '42%',
       width: '22%',
       top: '6%',
       delay: '700ms',
-    })
-  }
-
-  blocks.push({
-    id: 'review',
-    day: 1,
-    title: 'CV review & analysis',
-    meta: '13:00 - 14:30',
-    tone: 'info',
-    left: '23%',
-    width: '17%',
-    top: '34%',
-    delay: '500ms',
-  })
-
-  if (code) {
-    blocks.push({
+    },
+    {
+      id: 'review',
+      day: 1,
+      title: 'CV review & analysis',
+      meta: '13:00 - 14:30',
+      tone: 'info',
+      left: '23%',
+      width: '17%',
+      top: '34%',
+      delay: '500ms',
+    },
+    {
       id: 'code',
       day: 3,
       title: 'Access code issued',
-      meta: `•••• ${code.code_hint}`,
+      meta: `•••• ${DEMO_CODE_HINT}`,
       tone: 'accent',
       left: '67%',
       width: '15%',
       top: '12%',
       delay: '900ms',
-    })
-  }
-
-  if (appointed) {
-    blocks.push({
+    },
+    {
       id: 'appointed',
       day: 3,
-      title: fullName(appointed.first_name, appointed.last_name),
+      title: DEMO_APPOINTED_NAME,
       meta: '14:00 - 15:30',
       tone: 'warning',
       left: '67%',
       width: '15%',
       top: '62%',
       delay: '1100ms',
-    })
-  }
-
-  if (staff) {
-    blocks.push({
+    },
+    {
       id: 'staff',
       day: 4,
       title: 'Staff ID allocated',
-      meta: staff.staff_id,
+      meta: DEMO_STAFF_ID,
       tone: 'deep',
       left: '85%',
       width: '14%',
       top: '42%',
       delay: '1300ms',
-    })
-    blocks.push({
+    },
+    {
       id: 'verified',
       day: 4,
       title: 'Verified & audited',
@@ -130,8 +143,8 @@ export function PipelineBoard({ className }: { className?: string }) {
       width: '14%',
       top: '74%',
       delay: '1500ms',
-    })
-  }
+    },
+  ]
 
   return (
     <div

@@ -27,7 +27,42 @@ import { EmploymentCategoryBadge } from '@/components/ui/status-badges'
 import { cn } from '@/lib/cn'
 import { locationPath, publicApi } from '@/lib/api'
 import { formatDate, untilNow } from '@/lib/format'
-import { auditLogs } from '@/mocks/seed'
+
+/**
+ * Frozen sample entries for the marketing audit-trail card. The landing page
+ * never shows real activity (privacy), so this data is decorative by design;
+ * timestamps drift with page load so the card always reads as recent.
+ */
+const DEMO_AUDIT_ENTRIES = [
+  {
+    id: 'audit-1',
+    action: 'application.status_changed',
+    actor_name: 'Aisha Adeyemi',
+    entity_type: 'application',
+    created_at: new Date(Date.now() - 2 * 3600_000).toISOString(),
+  },
+  {
+    id: 'audit-2',
+    action: 'access_code.issued',
+    actor_name: 'Chidi Okonkwo',
+    entity_type: 'access_code',
+    created_at: new Date(Date.now() - 5 * 3600_000).toISOString(),
+  },
+  {
+    id: 'audit-3',
+    action: 'interview.announcement_published',
+    actor_name: 'Aisha Adeyemi',
+    entity_type: 'interview_announcement',
+    created_at: new Date(Date.now() - 26 * 3600_000).toISOString(),
+  },
+  {
+    id: 'audit-4',
+    action: 'staff.record_created',
+    actor_name: 'Chidi Okonkwo',
+    entity_type: 'staff_profile',
+    created_at: new Date(Date.now() - 49 * 3600_000).toISOString(),
+  },
+]
 
 /**
  * The public landing page.
@@ -111,7 +146,7 @@ export function HomePage() {
     jobs.map((job) => job.location_name ?? locationPath(job.location_id)),
   ).size
   const openings = jobs.reduce((sum, job) => sum + job.openings, 0)
-  const recentAudit = auditLogs.slice(0, 4)
+  const recentAudit = DEMO_AUDIT_ENTRIES.slice(0, 4)
 
   return (
     <div className="bg-ink-100">

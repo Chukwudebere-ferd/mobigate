@@ -55,7 +55,12 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { adminApi, employmentCategoryLabels, locationPath } from '@/lib/api'
+import {
+  adminApi,
+  employmentCategoryLabels,
+  locationPath,
+  sortLocationsByPath,
+} from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatDate, formatDateTime, fullName } from '@/lib/format'
 import type {
@@ -66,6 +71,10 @@ import type {
 } from '@/types/domain'
 
 const PAGE_SIZE = 10
+
+/** Suggested departments in the manual-entry form. */
+const DEPARTMENT_PRESETS = ['Developer', 'Marketing', 'HR'] as const
+const CUSTOM_DEPARTMENT = '__custom__'
 
 const staffStatusLabels: Record<StaffStatus, string> = {
   active: 'Active',
@@ -373,6 +382,7 @@ export function AdminStaffPage() {
           onCreated={(staff) => {
             setManualOpen(false)
             void queryClient.invalidateQueries({ queryKey: ['staff'] })
+            void queryClient.invalidateQueries({ queryKey: ['departments'] })
             toast.success(
               `${fullName(staff.first_name, staff.last_name)} added as ${staff.staff_id}.`,
             )
@@ -398,7 +408,8 @@ function ManualStaffDialog({
   const [phone, setPhone] = React.useState('')
   const [category, setCategory] =
     React.useState<EmploymentCategory>('employee')
-  const [departmentId, setDepartmentId] = React.useState('')
+  const [departmentChoice, setDepartmentChoice] = React.useState('')
+  const [customDepartment, setCustomDepartment] = React.useState('')
   const [locationId, setLocationId] = React.useState('')
   const [position, setPosition] = React.useState('')
   const [appointmentDate, setAppointmentDate] = React.useState('')
@@ -413,18 +424,26 @@ function ManualStaffDialog({
   })
 
   const createMutation = useMutation({
-    mutationFn: () =>
-      adminApi.createStaff({
+    mutationFn: async () => {
+      const departmentName =
+        departmentChoice === CUSTOM_DEPARTMENT
+          ? customDepartment.trim()
+          : departmentChoice
+      const department = departmentName
+        ? await adminApi.ensureDepartment(departmentName)
+        : undefined
+      return adminApi.createStaff({
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         email: email.trim(),
         phone: phone.trim(),
         employment_category: category,
-        department_id: departmentId || undefined,
+        department_id: department?.id,
         location_id: locationId || undefined,
         position: position.trim() || undefined,
         appointment_date: appointmentDate || undefined,
-      }),
+      })
+    },
     onSuccess: onCreated,
     onError: (error: unknown) => {
       toast.error(
@@ -433,11 +452,42 @@ function ManualStaffDialog({
     },
   })
 
+  const departmentOptions = React.useMemo(() => {
+    const names = new Map<string, string>()
+    for (const preset of DEPARTMENT_PRESETS) {
+      names.set(preset.toLowerCase(), preset)
+    }
+    for (const department of departmentsQuery.data ?? []) {
+      const name = department.name.trim()
+      const key = name.toLowerCase()
+      if (name && !names.has(key)) names.set(key, name)
+    }
+    const presetKeys = new Set(
+      DEPARTMENT_PRESETS.map((preset) => preset.toLowerCase()),
+    )
+    const extras = [...names.entries()]
+      .filter(([key]) => !presetKeys.has(key))
+      .map(([, name]) => name)
+      .sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }))
+    return [...DEPARTMENT_PRESETS, ...extras]
+  }, [departmentsQuery.data])
+
+  const customDepartmentValid =
+    departmentChoice !== CUSTOM_DEPARTMENT ||
+    customDepartment.trim().length > 0
+
   const valid =
     firstName.trim().length > 0 &&
     lastName.trim().length > 0 &&
     email.trim().length > 0 &&
-    phone.trim().length > 0
+    phone.trim().length > 0 &&
+    customDepartmentValid
+
+  const locationOptions = sortLocationsByPath(
+    (locationsQuery.data ?? []).filter(
+      (location) => location.status === 'approved',
+    ),
+  )
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -515,19 +565,47 @@ function ManualStaffDialog({
                 )}
               </Select>
             </Field>
-            <Field label="Department" htmlFor="manual-department">
-              <Select
-                id="manual-department"
-                value={departmentId}
-                onChange={(e) => setDepartmentId(e.target.value)}
-              >
-                <option value="">No department</option>
-                {(departmentsQuery.data ?? []).map((department) => (
-                  <option key={department.id} value={department.id}>
-                    {department.name}
-                  </option>
-                ))}
-              </Select>
+            <Field
+              label="Department"
+              htmlFor="manual-department"
+              hint={
+                departmentChoice === CUSTOM_DEPARTMENT
+                  ? 'Type the new department name.'
+                  : undefined
+              }
+            >
+              <div className="space-y-2">
+                <Select
+                  id="manual-department"
+                  value={departmentChoice}
+                  onChange={(e) => {
+                    const value = e.target.value
+                    setDepartmentChoice(value)
+                    if (value !== CUSTOM_DEPARTMENT) {
+                      setCustomDepartment('')
+                    }
+                  }}
+                >
+                  <option value="">No department</option>
+                  {departmentOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_DEPARTMENT}>Other / custom…</option>
+                </Select>
+                {departmentChoice === CUSTOM_DEPARTMENT && (
+                  <Input
+                    id="manual-department-custom"
+                    value={customDepartment}
+                    maxLength={80}
+                    onChange={(e) => setCustomDepartment(e.target.value)}
+                    placeholder="e.g. Product, Sales"
+                    aria-label="Custom department name"
+                    invalid={customDepartment.trim().length === 0}
+                  />
+                )}
+              </div>
             </Field>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -538,13 +616,11 @@ function ManualStaffDialog({
                 onChange={(e) => setLocationId(e.target.value)}
               >
                 <option value="">No location</option>
-                {(locationsQuery.data ?? [])
-                  .filter((location) => location.status === 'approved')
-                  .map((location) => (
-                    <option key={location.id} value={location.id}>
-                      {location.name}
-                    </option>
-                  ))}
+                {locationOptions.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {locationPath(location.id)}
+                  </option>
+                ))}
               </Select>
             </Field>
             <Field label="Position" htmlFor="manual-position">

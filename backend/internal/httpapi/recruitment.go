@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -195,14 +196,11 @@ func buildJobInput(payload jobPayload, present map[string]bool, creating bool) (
 
 	if creating || present["employment_category"] {
 		if raw := trimmed(payload.EmploymentCategory); raw != "" {
-			category := models.EmploymentCategory(raw)
-			switch category {
-			case models.CategoryDirector, models.CategoryEmployee,
-				models.CategoryContractor, models.CategoryPartner:
-				input.EmploymentCategory = &category
-			default:
-				return input, errors.New("invalid employment_category")
+			if utf8.RuneCountInString(raw) > 80 {
+				return input, errors.New("employment_category must be 80 characters or fewer")
 			}
+			category := models.EmploymentCategory(raw)
+			input.EmploymentCategory = &category
 		}
 	}
 

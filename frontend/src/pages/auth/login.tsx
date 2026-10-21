@@ -6,15 +6,28 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Field, Input } from '@/components/ui/input'
 import { http } from '@/lib/api/client'
+import { ApiError } from '@/lib/api/client'
 import type { MeResponse } from '@/types/domain'
+import type { UserRole } from '@/types/domain'
 
 /**
- * Administrator sign-in.
+ * Where a freshly signed-in user belongs: their own portal by default, or the
+ * requested page when it lies inside that portal's area.
+ */
+function destinationFor(role: UserRole, next: string | null): string {
+  const home =
+    role === 'applicant' || role === 'staff' ? `/${role}` : '/admin'
+  if (next && (next === home || next.startsWith(`${home}/`))) return next
+  return home
+}
+
+/**
+ * Sign-in for every role.
  *
  * Better Auth owns the credential check. After sign-in we ask the Go API for
- * the authoritative MGM profile: only active admin/super_admin accounts may
- * enter the panel. Pending accounts are sent to the panel, where the route
- * guard shows the approval state.
+ * the authoritative MGM profile and send the user to their own portal:
+ * applicants to /applicant, staff to /staff, administrators to /admin.
+ * A `next` parameter is honoured only when it belongs to the user's area.
  */
 export function LoginPage() {
   const navigate = useNavigate()
@@ -28,8 +41,6 @@ export function LoginPage() {
   const [submitting, setSubmitting] = React.useState(false)
 
   const next = searchParams.get('next')
-  const destination =
-    next && next.startsWith('/admin') ? next : '/admin'
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -54,16 +65,23 @@ export function LoginPage() {
         return
       }
 
-      const me = await http.get<MeResponse>('/me')
+      let me: MeResponse
+      try {
+        me = await http.get<MeResponse>('/me')
+      } catch (cause) {
+        // A valid Better Auth session without a domain profile means the
+        // account was never provisioned into the portal.
+        if (cause instanceof ApiError && cause.isUnauthorized) {
+          setError(
+            'This account has no portal access yet. Applicants can create an account from the sign-up page; staff must complete onboarding with an access code.',
+          )
+          return
+        }
+        throw cause
+      }
       queryClient.setQueryData(['session', 'me'], me)
 
-      if (me.user.role !== 'admin' && me.user.role !== 'super_admin') {
-        await authClient.signOut()
-        setError('This portal is for administrator accounts only.')
-        return
-      }
-
-      navigate(destination, { replace: true })
+      navigate(destinationFor(me.user.role, next), { replace: true })
     } catch {
       setError('Unable to sign in right now. Please try again.')
     } finally {
@@ -97,10 +115,10 @@ export function LoginPage() {
         <div className="w-full max-w-sm">
           <div className="rounded-xl border border-ink-200 bg-white p-7 shadow-xs">
             <h1 className="text-xl font-semibold tracking-tight text-ink-950">
-              Administrator sign in
+              Sign in
             </h1>
             <p className="mt-1.5 text-sm text-ink-500">
-              Use the account issued by your Super Admin.
+              Applicants, staff and administrators sign in here.
             </p>
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -146,6 +164,15 @@ export function LoginPage() {
                 </div>
               </Field>
 
+              <div className="flex justify-end">
+                <Link
+                  to="/forgot-password"
+                  className="text-xs font-medium text-brand-700 hover:text-brand-800"
+                >
+                  Forgot password?
+                </Link>
+              </div>
+
               {error ? (
                 <p
                   role="alert"
@@ -168,7 +195,14 @@ export function LoginPage() {
           </div>
 
           <p className="mt-4 text-center text-2xs text-ink-500">
-            Access is limited to approved administrator accounts.
+            Applying for a role?{' '}
+            <Link
+              to="/signup"
+              className="font-medium text-brand-700 hover:text-brand-800"
+            >
+              Create an account
+            </Link>{' '}
+            first — then sign in to apply.
           </p>
         </div>
       </main>
