@@ -9,6 +9,7 @@ import {
   MessageSquareText,
   Settings,
   Users,
+  Wallet,
   X,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
@@ -18,6 +19,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { adminApi } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { fullName } from '@/lib/format'
+import { AdminDisplayProvider } from '@/providers/admin-display'
 import { useSession } from '@/providers/session-provider'
 
 interface NavItem {
@@ -36,6 +38,7 @@ const primaryNav: NavItem[] = [
   { to: '/admin/shortlists', label: 'Shortlists', icon: Users },
   { to: '/admin/access-codes', label: 'Access Codes', icon: KeyRound },
   { to: '/admin/staff', label: 'Staff', icon: Users },
+  { to: '/admin/payroll', label: 'Payroll', icon: Wallet },
   { to: '/admin/locations', label: 'Locations', icon: MapPin },
 ]
 
@@ -130,8 +133,9 @@ export function AdminShell() {
   }
 
   return (
-    <div className="min-h-dvh bg-ink-50">
-      {/* -- Desktop sidebar -- */}
+    <AdminDisplayProvider>
+      <div className="min-h-dvh bg-ink-50">
+        {/* -- Desktop sidebar -- */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-ink-200 bg-white lg:flex">
         <SidebarContent applicationsCount={applicationsCount} />
       </aside>
@@ -221,7 +225,8 @@ export function AdminShell() {
           </div>
         </main>
       </div>
-    </div>
+      </div>
+    </AdminDisplayProvider>
   )
 }
 

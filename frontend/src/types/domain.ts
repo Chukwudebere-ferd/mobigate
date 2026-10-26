@@ -65,6 +65,13 @@ export type UserStatus = (typeof USER_STATUSES)[number]
 export const STAFF_STATUSES = ['active', 'suspended', 'exited'] as const
 export type StaffStatus = (typeof STAFF_STATUSES)[number]
 
+export const ADVANCE_REQUEST_STATUSES = [
+  'pending',
+  'approved',
+  'declined',
+] as const
+export type AdvanceRequestStatus = (typeof ADVANCE_REQUEST_STATUSES)[number]
+
 export const NOTIFICATION_CHANNELS = ['email', 'sms', 'whatsapp'] as const
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number]
 
@@ -251,6 +258,44 @@ export interface StaffProfile {
   /** Derived for display. */
   location_name?: string
   department_name?: string
+}
+
+export interface SalaryPayment {
+  id: string
+  tenant_id: string
+  staff_profile_id: string
+  staff_id: string
+  staff_name: string
+  month: number
+  year: number
+  /** Integer kobo; divide by 100 for naira. */
+  amount_kobo: number
+  note: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AdvanceRequest {
+  id: string
+  tenant_id: string
+  staff_profile_id: string
+  staff_id: string
+  staff_name: string
+  amount_kobo: number
+  reason: string
+  status: AdvanceRequestStatus
+  decision_note: string | null
+  decided_by: string | null
+  decided_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Response from GET /staff/payroll. */
+export interface StaffPayrollResponse {
+  salary_payments: SalaryPayment[]
+  advance_requests: AdvanceRequest[]
 }
 
 export interface Department {

@@ -790,6 +790,22 @@ function FileDropzone({
   onSelect: (file: File) => void
   onClear: () => void
 }) {
+  const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    if (!file) {
+      // oxlint-disable-next-line react/set-state-in-effect
+      setPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(file)
+    // The preview URL is an external resource created for the selected File;
+    // it must be regenerated on every StrictMode effect run.
+    // oxlint-disable-next-line react/set-state-in-effect
+    setPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
   return (
     <div className="rounded-lg border border-dashed border-ink-300 bg-ink-50/60 p-4">
       <div className="flex items-start gap-3">
@@ -803,8 +819,16 @@ function FileDropzone({
       </div>
 
       {file ? (
-        <div className="mt-3 flex items-center gap-2 rounded-md border border-ink-200 bg-white px-3 py-2">
-          <FileCheck aria-hidden className="size-4 shrink-0 text-success-600" />
+        <div className="mt-3 flex items-center gap-2.5 rounded-md border border-ink-200 bg-white px-3 py-2">
+          {previewUrl ? (
+            <img
+              src={previewUrl}
+              alt=""
+              className="size-9 shrink-0 rounded-md object-cover ring-1 ring-ink-200"
+            />
+          ) : (
+            <FileCheck aria-hidden className="size-4 shrink-0 text-success-600" />
+          )}
           <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink-700">
             {file.name}
           </span>

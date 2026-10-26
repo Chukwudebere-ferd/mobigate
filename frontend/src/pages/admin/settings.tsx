@@ -19,6 +19,7 @@ import {
   Send,
   ShieldCheck,
   Trash2,
+  Type,
   UserCheck,
   UserPlus,
   Users,
@@ -54,6 +55,11 @@ import { UserStatusBadge } from '@/components/ui/status-badges'
 import { adminApi } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatDate, formatDateTime, fullName } from '@/lib/format'
+import {
+  ADMIN_FONT_SIZES,
+  useAdminDisplay,
+  type AdminFontSize,
+} from '@/lib/admin-display'
 import { useSession } from '@/providers/session-provider'
 import type {
   MessageTemplate,
@@ -124,6 +130,7 @@ export function AdminSettingsPage() {
       <Tabs defaultValue="confirmation">
         <TabsList>
           <TabsTrigger value="confirmation">Confirmation messages</TabsTrigger>
+          <TabsTrigger value="display">Display</TabsTrigger>
           <TabsTrigger value="email">Email templates</TabsTrigger>
           <TabsTrigger value="codes">Access code settings</TabsTrigger>
           <TabsTrigger value="policies">Policies</TabsTrigger>
@@ -135,6 +142,9 @@ export function AdminSettingsPage() {
 
         <TabsContent value="confirmation" className="pt-5">
           <ConfirmationTemplates />
+        </TabsContent>
+        <TabsContent value="display" className="pt-5">
+          <DisplaySettings />
         </TabsContent>
         <TabsContent value="email" className="pt-5">
           <EmailTemplates />
@@ -155,6 +165,94 @@ export function AdminSettingsPage() {
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+/* -- Display ------------------------------------------------------------- */
+
+const FONT_SIZE_LABELS: Record<AdminFontSize, { label: string; hint: string }> = {
+  14: { label: 'Compact', hint: 'More content on screen' },
+  16: { label: 'Default', hint: 'Balanced reading size' },
+  18: { label: 'Large', hint: 'Easier on the eyes' },
+}
+
+function DisplaySettings() {
+  const { fontSize, setFontSize } = useAdminDisplay()
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Type className="size-4 text-ink-400" aria-hidden />
+          Admin text size
+        </CardTitle>
+        <p className="text-sm text-ink-500">
+          Choose how large the admin dashboard text appears. This preference
+          is saved in this browser only.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div
+          role="radiogroup"
+          aria-label="Admin text size"
+          className="grid gap-3 sm:grid-cols-3"
+        >
+          {ADMIN_FONT_SIZES.map((size) => {
+            const active = fontSize === size
+            return (
+              <button
+                key={size}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => setFontSize(size)}
+                className={cn(
+                  'rounded-lg border p-4 text-left transition-colors',
+                  active
+                    ? 'border-brand-300 bg-brand-50 ring-1 ring-brand-200'
+                    : 'border-ink-200 bg-white hover:border-ink-300 hover:bg-ink-50',
+                )}
+              >
+                <span className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-ink-900">
+                    {FONT_SIZE_LABELS[size].label}
+                  </span>
+                  {active && (
+                    <span className="text-2xs font-semibold text-brand-700">
+                      Selected
+                    </span>
+                  )}
+                </span>
+                <span className="mt-1 block text-xs text-ink-500">
+                  {FONT_SIZE_LABELS[size].hint}
+                </span>
+                <span
+                  className="mt-3 block font-semibold text-ink-800"
+                  style={{ fontSize: `${size}px` }}
+                >
+                  Aa · {size}px
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="rounded-lg border border-ink-200 bg-ink-50/60 p-4">
+          <p className="text-2xs font-semibold tracking-wider text-ink-400 uppercase">
+            Preview
+          </p>
+          <p
+            className="mt-1.5 font-semibold text-ink-900"
+            style={{ fontSize: `${fontSize}px` }}
+          >
+            Applications and staff records
+          </p>
+          <p className="mt-1 text-ink-600" style={{ fontSize: `${fontSize}px` }}>
+            This is how body text will appear across the admin workspace.
+          </p>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

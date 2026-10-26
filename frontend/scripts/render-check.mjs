@@ -40,6 +40,7 @@ const ROUTES = [
   ['/admin/shortlists', 'Shortlists'],
   ['/admin/access-codes', 'Access codes'],
   ['/admin/staff', 'Staff directory'],
+  ['/admin/payroll', 'Payroll workspace'],
   ['/admin/locations', 'Location management'],
   ['/admin/settings', 'Settings'],
   ['/admin/audit', 'Audit log'],

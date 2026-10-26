@@ -14,6 +14,8 @@ import type {
   AccessCode,
   AccessCodeFilters,
   AdminSettings,
+  AdvanceRequest,
+  AdvanceRequestStatus,
   Application,
   ApplicationEvent,
   ApplicationFilters,
@@ -32,12 +34,14 @@ import type {
   Paginated,
   Policy,
   PolicyAudience,
+  SalaryPayment,
   Shortlist,
   StaffDraftResponse,
   StaffDraftSaveResponse,
   StaffFilters,
   StaffMeResponse,
   StaffOnboardingResponse,
+  StaffPayrollResponse,
   StaffProfile,
   StaffRedemption,
   StaffStatus,
@@ -320,6 +324,19 @@ export const staffApi = {
     return http.get<StaffMeResponse>('/staff/me')
   },
 
+  /** GET /staff/payroll — salary assignments and upfront requests. */
+  async payroll(): Promise<StaffPayrollResponse> {
+    return http.get<StaffPayrollResponse>('/staff/payroll')
+  },
+
+  /** POST /staff/payroll/advances — request an upfront payment. */
+  async requestAdvance(payload: {
+    amount_kobo: number
+    reason: string
+  }): Promise<AdvanceRequest> {
+    return http.post<AdvanceRequest>('/staff/payroll/advances', payload)
+  },
+
   /**
    * GET /staff/documents/{id} — a short-lived signed URL for one of the
    * caller's own documents. Ownership is enforced server-side.
@@ -499,6 +516,53 @@ export const adminApi = {
     appointment_date?: string
   }): Promise<StaffProfile> {
     return http.post<StaffProfile>('/admin/staff', payload)
+  },
+
+  async listSalaryPayments(filters: {
+    year?: number
+    staff_profile_id?: string
+  } = {}): Promise<SalaryPayment[]> {
+    const response = await http.get<{ items: SalaryPayment[] }>(
+      '/admin/payroll/salary',
+      { ...filters },
+    )
+    return response.items
+  },
+
+  /** Create or update one staff/month/year assignment. */
+  async assignSalary(payload: {
+    staff_profile_id: string
+    month: number
+    year: number
+    amount_kobo: number
+    note?: string | null
+  }): Promise<SalaryPayment> {
+    return http.post<SalaryPayment>('/admin/payroll/salary', payload)
+  },
+
+  async listAdvanceRequests(
+    filters: { status?: AdvanceRequestStatus | 'all' } = {},
+  ): Promise<AdvanceRequest[]> {
+    const params =
+      filters.status && filters.status !== 'all'
+        ? { status: filters.status }
+        : undefined
+    const response = await http.get<{ items: AdvanceRequest[] }>(
+      '/admin/payroll/advances',
+      params,
+    )
+    return response.items
+  },
+
+  async decideAdvanceRequest(
+    id: string,
+    status: Exclude<AdvanceRequestStatus, 'pending'>,
+    note?: string,
+  ): Promise<AdvanceRequest> {
+    return http.patch<AdvanceRequest>(`/admin/payroll/advances/${id}`, {
+      status,
+      note,
+    })
   },
 
   async listLocations(): Promise<Location[]> {

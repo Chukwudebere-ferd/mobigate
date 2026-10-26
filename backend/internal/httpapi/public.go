@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -28,8 +29,10 @@ import (
 // Upload limits (README §M4). CVs are deferred until object storage for
 // documents is settled; photos go to Byteship today.
 const (
-	maxPhotoBytes = 2 << 20 // 2 MB
-	photoTypes    = "image/jpeg,image/png,image/webp"
+	maxPhotoBytes             = 2 << 20 // 2 MB
+	photoTypes                = "image/jpeg,image/png,image/webp"
+	photoUploadAttempts       = 3
+	photoUploadAttemptTimeout = 30 * time.Second
 )
 
 // publicSession resolves the signed-in user for /me and /staff routes.
@@ -233,24 +236,25 @@ func (h *Handler) submitApplication(w http.ResponseWriter, r *http.Request) {
 	}
 	in.JobID = jobID
 
-	file, header, err := h.photoFromForm(r)
+	header, err := h.photoFromForm(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if file != nil {
-		defer file.Close()
-		key, docErr := h.uploadPhoto(r.Context(), applicantID, file, header)
-		if docErr != nil {
-			writeError(w, http.StatusBadGateway, "the photograph could not be uploaded; try again")
-			return
-		}
-		in.Photo = &store.DocumentInput{
-			FileName:   sanitizeFilename(header.Filename),
-			StorageKey: key,
-			MimeType:   detectPhotoType(header),
-			SizeBytes:  header.Size,
-		}
+	if header == nil {
+		writeError(w, http.StatusBadRequest, "attach a passport photograph")
+		return
+	}
+	key, docErr := h.uploadPhoto(r.Context(), applicantID, header)
+	if docErr != nil {
+		writeError(w, http.StatusBadGateway, "the photograph could not be uploaded; try again")
+		return
+	}
+	in.Photo = &store.DocumentInput{
+		FileName:   sanitizeFilename(header.Filename),
+		StorageKey: key,
+		MimeType:   detectPhotoType(header),
+		SizeBytes:  header.Size,
 	}
 
 	application, err := h.Store.SubmitApplication(r.Context(), in)
@@ -324,57 +328,94 @@ func decodeApplicationForm(r *http.Request, in *store.ApplicationInput) error {
 	return nil
 }
 
-// photoFromForm extracts and validates the photo upload. A missing photo is
-// accepted: some candidates apply from devices that cannot attach files.
-func (h *Handler) photoFromForm(r *http.Request) (multipart.File, *multipart.FileHeader, error) {
+// photoFromForm extracts and validates the photo upload. A nil header means
+// the request had no photo; each caller decides whether that is allowed.
+func (h *Handler) photoFromForm(r *http.Request) (*multipart.FileHeader, error) {
 	if r.MultipartForm == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	files := r.MultipartForm.File["photo"]
 	if len(files) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 	header := files[0]
 
 	if header.Size > maxPhotoBytes {
-		return nil, nil, errors.New("the photograph must be 2 MB or smaller")
+		return nil, errors.New("the photograph must be 2 MB or smaller")
 	}
 
 	file, err := header.Open()
 	if err != nil {
-		return nil, nil, errors.New("the photograph could not be read")
+		return nil, errors.New("the photograph could not be read")
 	}
+	defer file.Close()
 
 	// Content sniffing, not the client-supplied type (README §11.3).
 	head := make([]byte, 512)
 	n, err := io.ReadFull(file, head)
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-		file.Close()
-		return nil, nil, errors.New("the photograph could not be read")
+		return nil, errors.New("the photograph could not be read")
 	}
 	detected := http.DetectContentType(head[:n])
 	if !isAllowedPhotoType(detected) {
-		file.Close()
-		return nil, nil, errors.New("attach a PNG, JPG or WEBP image")
+		return nil, errors.New("attach a PNG, JPG or WEBP image")
 	}
-
-	// Re-open so the upload reads from the start.
-	file.Close()
-	file, err = header.Open()
-	if err != nil {
-		return nil, nil, errors.New("the photograph could not be read")
-	}
-	return file, header, nil
+	return header, nil
 }
 
 // uploadPhoto streams a validated photo into Byteship under a tenant-scoped,
-// non-public path.
-func (h *Handler) uploadPhoto(ctx context.Context, applicantID uuid.UUID, reader io.Reader, header *multipart.FileHeader) (string, error) {
+// non-public path. The reader is reopened for each retry because a failed
+// transport attempt may have consumed part of it.
+func (h *Handler) uploadPhoto(ctx context.Context, applicantID uuid.UUID, header *multipart.FileHeader) (string, error) {
 	if h.Storage == nil || !h.Storage.Configured() {
 		return "", storage.ErrNotConfigured
 	}
 	key := fmt.Sprintf("users/%s/photos/%d-%s", applicantID, time.Now().UnixNano(), uuid.NewString()[:8])
-	return h.Storage.Upload(ctx, key, sanitizeFilename(header.Filename), detectPhotoType(header), reader, header.Size)
+
+	attempts := 0
+	var lastErr error
+	for attempt := 1; attempt <= photoUploadAttempts; attempt++ {
+		attempts = attempt
+		file, err := header.Open()
+		if err != nil {
+			return "", fmt.Errorf("open photo: %w", err)
+		}
+
+		attemptCtx, cancel := context.WithTimeout(ctx, photoUploadAttemptTimeout)
+		uploadedKey, err := h.Storage.Upload(
+			attemptCtx,
+			key,
+			sanitizeFilename(header.Filename),
+			detectPhotoType(header),
+			file,
+			header.Size,
+		)
+		cancel()
+		if closeErr := file.Close(); closeErr != nil {
+			slog.Warn("photo upload stream close failed", "error", closeErr)
+		}
+		if err == nil {
+			return uploadedKey, nil
+		}
+
+		lastErr = err
+		if attempt == photoUploadAttempts || !storage.Retryable(err) || ctx.Err() != nil {
+			break
+		}
+		backoff := time.Duration(attempt) * 250 * time.Millisecond
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+
+	slog.Error("photo upload failed",
+		"applicant_id", applicantID,
+		"attempts", attempts,
+		"error", lastErr,
+	)
+	return "", lastErr
 }
 
 // -- Applicant self-service ---------------------------------------------------
@@ -571,14 +612,13 @@ func (h *Handler) editMyApplication(w http.ResponseWriter, r *http.Request) {
 		update.Qualification = &raw
 	}
 
-	file, header, err := h.photoFromForm(r)
+	header, err := h.photoFromForm(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if file != nil {
-		defer file.Close()
-		key, uploadErr := h.uploadPhoto(r.Context(), userID, file, header)
+	if header != nil {
+		key, uploadErr := h.uploadPhoto(r.Context(), userID, header)
 		if uploadErr != nil {
 			writeError(w, http.StatusBadGateway, "the photograph could not be uploaded; try again")
 			return

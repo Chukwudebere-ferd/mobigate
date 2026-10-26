@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"strings"
 	"time"
 
@@ -27,6 +28,32 @@ var ErrNotConfigured = errors.New("storage is not configured")
 // SignedURLTTL is how long a delivery URL stays valid. Short enough to limit
 // leakage if a URL is forwarded, long enough for a browser to fetch an image.
 const SignedURLTTL = 10 * time.Minute
+
+// Retryable reports whether an upload error is likely to succeed on another
+// attempt. Validation and configuration errors are permanent; transport
+// failures, rate limits and upstream 5xx responses are transient.
+func Retryable(err error) bool {
+	if err == nil || errors.Is(err, ErrNotConfigured) {
+		return false
+	}
+	var apiErr *byteship.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.StatusCode == 0 {
+			return true
+		}
+		switch apiErr.StatusCode {
+		case 408, 425, 429, 500, 502, 503, 504:
+			return true
+		default:
+			return false
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
 
 // Store wraps the Byteship client.
 type Store struct {
@@ -79,7 +106,7 @@ func (s *Store) Upload(ctx context.Context, path, filename, contentType string, 
 	if err != nil {
 		if berr, ok := byteship.AsError(err); ok {
 			slog.Warn("byteship upload rejected", "code", berr.Code, "status", berr.StatusCode)
-			return "", fmt.Errorf("upload rejected: %s", berr.Code)
+			return "", fmt.Errorf("upload rejected: %w", berr)
 		}
 		return "", fmt.Errorf("upload: %w", err)
 	}

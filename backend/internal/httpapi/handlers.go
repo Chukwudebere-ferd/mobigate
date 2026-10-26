@@ -86,6 +86,8 @@ func (h *Handler) Register(r chi.Router) {
 		r.Put("/onboarding/draft", h.saveOnboardingDraft)
 		r.Post("/onboarding", h.completeOnboarding)
 		r.Get("/me", h.staffMe)
+		r.Get("/payroll", h.staffPayroll)
+		r.Post("/payroll/advances", h.requestAdvance)
 		r.Get("/documents/{id}", h.staffDocumentURL)
 	})
 
@@ -185,6 +187,11 @@ func (h *Handler) registerAdminRoutes(r chi.Router) {
 	r.Get("/staff", h.listStaff)
 	r.Post("/staff", h.createStaff)
 	r.Get("/staff/{id}", h.getStaff)
+
+	r.Get("/payroll/salary", h.listSalaryPayments)
+	r.Post("/payroll/salary", h.upsertSalaryPayment)
+	r.Get("/payroll/advances", h.listAdvanceRequests)
+	r.Patch("/payroll/advances/{id}", h.decideAdvanceRequest)
 
 	r.Get("/locations", h.listLocations)
 	r.Post("/locations", h.createLocation)

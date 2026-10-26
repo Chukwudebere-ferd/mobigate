@@ -41,6 +41,37 @@ export function relativeTime(value?: string | null): string {
   }
 }
 
+export const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const
+
+/** Integer kobo to a Nigerian naira string, e.g. 25000000 -> ₦250,000.00. */
+export function formatNairaFromKobo(kobo: number): string {
+  if (!Number.isFinite(kobo)) return '—'
+  return new Intl.NumberFormat('en-NG', {
+    style: 'currency',
+    currency: 'NGN',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(kobo / 100)
+}
+
+export function formatMonthYear(month: number, year: number): string {
+  const name = MONTH_NAMES[month - 1]
+  return name ? `${name} ${year}` : '—'
+}
+
 /** "in 4 days" / "3 hours ago" for upcoming and past timestamps. */
 export function untilNow(value?: string | null): string {
   if (!value) return '—'

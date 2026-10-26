@@ -11,6 +11,7 @@ import { AdminDashboardPage } from '@/pages/admin/dashboard'
 import { AdminInterviewsPage } from '@/pages/admin/interviews'
 import { AdminJobsPage } from '@/pages/admin/jobs'
 import { AdminLocationsPage } from '@/pages/admin/locations'
+import { AdminPayrollPage } from '@/pages/admin/payroll'
 import { AdminSettingsPage } from '@/pages/admin/settings'
 import { AdminShortlistsPage } from '@/pages/admin/shortlists'
 import { AdminStaffPage } from '@/pages/admin/staff'
@@ -119,6 +120,7 @@ export const routes = [
       { path: '/admin/shortlists', element: <AdminShortlistsPage /> },
       { path: '/admin/access-codes', element: <AdminAccessCodesPage /> },
       { path: '/admin/staff', element: <AdminStaffPage /> },
+      { path: '/admin/payroll', element: <AdminPayrollPage /> },
       { path: '/admin/locations', element: <AdminLocationsPage /> },
       { path: '/admin/settings', element: <AdminSettingsPage /> },
       { path: '/admin/audit', element: <AdminAuditPage /> },
