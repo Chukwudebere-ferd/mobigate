@@ -52,7 +52,7 @@ type Handler struct {
 // Path groups:
 //   - /public/*   unauthenticated careers site
 //   - /me/*       the signed-in applicant or staff member
-//   - /staff/*    staff onboarding
+//   - /staff/*    staff onboarding and the active-staff workspace
 //   - /admin/*    admin panel, requires an admin session
 //   - /api/auth/* Better Auth, proxied or mounted separately
 func (h *Handler) Register(r chi.Router) {
@@ -80,15 +80,26 @@ func (h *Handler) Register(r chi.Router) {
 	})
 
 	r.Route("/staff", func(r chi.Router) {
-		h.require(models.RoleApplicant, models.RoleStaff, models.RoleAdmin, models.RoleSuperAdmin)(r)
-		r.Post("/redeem", h.redeemAccessCode)
-		r.Get("/onboarding/draft", h.getOnboardingDraft)
-		r.Put("/onboarding/draft", h.saveOnboardingDraft)
-		r.Post("/onboarding", h.completeOnboarding)
-		r.Get("/me", h.staffMe)
-		r.Get("/payroll", h.staffPayroll)
-		r.Post("/payroll/advances", h.requestAdvance)
-		r.Get("/documents/{id}", h.staffDocumentURL)
+		// Onboarding starts with an admin-issued code. Applicants redeem it
+		// before completing the form promotes them to the staff role.
+		r.Group(func(r chi.Router) {
+			h.require(models.RoleApplicant, models.RoleStaff, models.RoleAdmin, models.RoleSuperAdmin)(r)
+			r.Post("/redeem", h.redeemAccessCode)
+			r.Get("/onboarding/draft", h.getOnboardingDraft)
+			r.Put("/onboarding/draft", h.saveOnboardingDraft)
+			r.Post("/onboarding", h.completeOnboarding)
+		})
+
+		// The staff workspace is staff-only. The store lookup returns
+		// ErrNotFound for a missing, suspended or exited staff record, so the
+		// handlers respond 404 rather than exposing an inactive record.
+		r.Group(func(r chi.Router) {
+			h.require(models.RoleStaff)(r)
+			r.Get("/me", h.staffMe)
+			r.Get("/payroll", h.staffPayroll)
+			r.Post("/payroll/advances", h.requestAdvance)
+			r.Get("/documents/{id}", h.staffDocumentURL)
+		})
 	})
 
 	r.Route("/admin", func(r chi.Router) {

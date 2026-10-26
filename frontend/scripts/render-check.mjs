@@ -32,6 +32,7 @@ const ROUTES = [
   ['/applicant/applications/app-14', 'Application status (rejected)'],
   ['/applicant/interviews', 'Interview announcements'],
   ['/staff', 'Staff profile'],
+  ['/staff/payroll', 'Staff payroll'],
   ['/staff/onboarding', 'Access code redemption'],
   ['/admin', 'Dashboard'],
   ['/admin/applications', 'Applications'],

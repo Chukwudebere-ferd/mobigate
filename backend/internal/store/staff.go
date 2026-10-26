@@ -739,7 +739,9 @@ func (in *OnboardingInput) SetApplicationID(id *uuid.UUID) {
 
 // -- Staff self-service ------------------------------------------------------
 
-// StaffByUserID loads the staff profile belonging to a signed-in user.
+// StaffByUserID loads the current staff profile belonging to a signed-in user.
+// Only an active record grants access to the staff workspace; suspended and
+// exited records are reported as not found.
 func (s *Store) StaffByUserID(ctx context.Context, userID uuid.UUID) (models.StaffProfile, error) {
 	const q = `
 		SELECT
@@ -765,7 +767,13 @@ func (s *Store) StaffByUserID(ctx context.Context, userID uuid.UUID) (models.Sta
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.StaffProfile{}, ErrNotFound
 	}
-	return staff, err
+	if err != nil {
+		return models.StaffProfile{}, err
+	}
+	if staff.Status != models.StaffActive {
+		return models.StaffProfile{}, ErrNotFound
+	}
+	return staff, nil
 }
 
 // StaffDocuments lists the documents attached to a staff profile.

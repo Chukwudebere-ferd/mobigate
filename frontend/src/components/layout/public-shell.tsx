@@ -8,14 +8,12 @@ const NAV_LINKS = [
   { to: '/', label: 'Platform' },
   { to: '/careers', label: 'Careers' },
   { to: '/applicant', label: 'Applicant portal' },
-  { to: '/staff', label: 'Staff portal' },
 ]
 
 /** Repeated in the footer ticker. Points at real routes only. */
 const TICKER_LINKS = [
   { to: '/careers', label: 'Open roles' },
   { to: '/applicant', label: 'Track your application' },
-  { to: '/staff', label: 'Staff portal' },
   { to: '/', label: 'How MGM-Portal works' },
   { to: '/applicant/interviews', label: 'Interview announcements' },
   { to: '/careers', label: 'Apply online' },
@@ -115,7 +113,6 @@ export function PublicShell() {
               title="Portals"
               links={[
                 { to: '/applicant', label: 'Applicant portal' },
-                { to: '/staff', label: 'Staff portal' },
                 { to: '/careers', label: 'Open roles' },
               ]}
             />

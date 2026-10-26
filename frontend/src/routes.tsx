@@ -1,5 +1,6 @@
 import { createBrowserRouter } from 'react-router-dom'
 
+import { RequireActiveStaff } from '@/components/auth/require-active-staff'
 import { RequireRole } from '@/components/auth/require-role'
 import { AdminShell } from '@/components/layout/admin-shell'
 import { PublicShell } from '@/components/layout/public-shell'
@@ -35,6 +36,7 @@ import { ApplicationReceivedPage } from '@/pages/public/received'
 
 import { StaffLayout } from '@/pages/staff/layout'
 import { StaffOnboardingPage } from '@/pages/staff/onboarding'
+import { StaffPayrollPage } from '@/pages/staff/payroll'
 import { StaffPortalPage } from '@/pages/staff/portal'
 
 import { NotFoundPage } from '@/pages/not-found'
@@ -88,9 +90,9 @@ export const routes = [
     ],
   },
 
-  // -- Staff portal --------------------------------------------------------
-  // Staff onboarding is opened with an admin-issued access code; the API
-  // scopes every /staff read to the caller's own record.
+  // -- Staff onboarding ----------------------------------------------------
+  // Applicants redeem an admin-issued access code here. Completing the form
+  // promotes their account to the staff role and creates the staff record.
   {
     element: (
       <RequireRole
@@ -100,8 +102,28 @@ export const routes = [
       </RequireRole>
     ),
     children: [
-      { path: '/staff', element: <StaffPortalPage /> },
       { path: '/staff/onboarding', element: <StaffOnboardingPage /> },
+    ],
+  },
+
+  // -- Staff workspace -----------------------------------------------------
+  // Only an active staff record may open the dashboard or payroll. The outer
+  // guard only requires a signed-in account; RequireActiveStaff is the real
+  // gate and shows a 404 for applicants, admins and non-active staff. The API
+  // enforces the same rule independently.
+  {
+    element: (
+      <RequireRole
+        roles={['applicant', 'staff', 'admin', 'super_admin']}
+      >
+        <RequireActiveStaff>
+          <StaffLayout />
+        </RequireActiveStaff>
+      </RequireRole>
+    ),
+    children: [
+      { path: '/staff', element: <StaffPortalPage /> },
+      { path: '/staff/payroll', element: <StaffPayrollPage /> },
     ],
   },
 

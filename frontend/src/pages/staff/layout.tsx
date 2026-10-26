@@ -1,4 +1,5 @@
 import {
+  Banknote,
   Briefcase,
   IdCard,
   LayoutDashboard,
@@ -14,13 +15,20 @@ import { fullName } from '@/lib/format'
 import { useSession } from '@/providers/session-provider'
 import type { Session } from '@/types/domain'
 
-const navItems = [
+const staffNavItems = [
   { to: '/staff', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/staff/payroll', label: 'Payroll', icon: Banknote, end: false },
+  { to: '/staff/onboarding', label: 'Onboarding', icon: IdCard, end: false },
+]
+
+/** Applicants only need onboarding until their staff record is approved. */
+const onboardingNavItems = [
   { to: '/staff/onboarding', label: 'Onboarding', icon: IdCard, end: false },
 ]
 
 function pageLabel(pathname: string) {
   if (pathname.startsWith('/staff/onboarding')) return 'Onboarding'
+  if (pathname.startsWith('/staff/payroll')) return 'Payroll'
   return 'Overview'
 }
 
@@ -144,6 +152,9 @@ function SidebarContent({
   user: Session['user']
   onSignOut: () => Promise<void>
 }) {
+  const navItems =
+    user.role === 'staff' ? staffNavItems : onboardingNavItems
+
   return (
     <>
       <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-ink-200 px-5">

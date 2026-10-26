@@ -34,6 +34,7 @@ import { Checkbox, Field, Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import { publicApi, sortLocationsByName, staffApi } from '@/lib/api'
 import { formatBytes } from '@/lib/format'
+import { useSession } from '@/providers/session-provider'
 import { EMPLOYMENT_CATEGORIES, type StaffRedemption } from '@/types/domain'
 
 /* -------------------------------------------------------------------------- */
@@ -168,6 +169,7 @@ function toEmploymentCategory(
 /* -------------------------------------------------------------------------- */
 
 export function StaffOnboardingPage() {
+  const { refresh } = useSession()
   const [code, setCode] = useState('')
   const [redemption, setRedemption] = useState<StaffRedemption | null>(null)
   const [staffId, setStaffId] = useState<string | null>(null)
@@ -199,6 +201,9 @@ export function StaffOnboardingPage() {
         buildOnboardingForm(values, policyIds),
       ),
     onSuccess: (result) => {
+      // Onboarding promotes the account to the staff role. Refresh the
+      // session so the new staff workspace is reachable immediately.
+      void refresh()
       setStaffId(result.staff.staff_id)
       setStaffName(`${result.staff.first_name} ${result.staff.last_name}`)
       toast.success('Staff profile created')
