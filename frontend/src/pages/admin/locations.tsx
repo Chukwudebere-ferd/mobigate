@@ -40,6 +40,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { adminApi, locationPath } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatDate } from '@/lib/format'
+import { useSession } from '@/providers/session-provider'
 import type { Location, LocationType } from '@/types/domain'
 
 const locationTypeLabels: Record<LocationType, string> = {
@@ -113,6 +114,8 @@ function parentageError(
 
 export function AdminLocationsPage() {
   const queryClient = useQueryClient()
+  const { role } = useSession()
+  const isSuperAdmin = role === 'super_admin'
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   // `null` means "use the default expansion"; a Set means the user has
   // explicitly opened or closed nodes.
@@ -185,6 +188,18 @@ export function AdminLocationsPage() {
     ? (childrenMap.get(selected.id) ?? [])
     : []
 
+  const manageableChildTypes = React.useCallback(
+    (type: LocationType) =>
+      allowedChildTypes[type].filter(
+        (child) =>
+          isSuperAdmin || (child !== 'country' && child !== 'state'),
+      ),
+    [isSuperAdmin],
+  )
+  const selectedChildTypes = selected
+    ? manageableChildTypes(selected.type)
+    : []
+
   const approveMutation = useMutation({
     mutationFn: (id: string) => adminApi.approveLocation(id),
     onSuccess: (updated) => {
@@ -230,14 +245,16 @@ export function AdminLocationsPage() {
                   approval
                 </p>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setAddParentId('root')}
-              >
-                <Plus />
-                Add country
-              </Button>
+              {isSuperAdmin && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAddParentId('root')}
+                >
+                  <Plus />
+                  Add country
+                </Button>
+              )}
             </div>
 
             <div className="p-2">
@@ -275,8 +292,9 @@ export function AdminLocationsPage() {
                 Pending approval
               </h2>
               <p className="text-xs text-ink-500">
-                Locations created by an Admin stay pending until a Super Admin
-                approves them.
+                {isSuperAdmin
+                  ? 'Locations created by an Admin stay pending until a Super Admin approves them.'
+                  : 'Your proposed locations stay pending until a Super Admin approves them.'}
               </p>
             </div>
             {pending.length === 0 ? (
@@ -307,15 +325,20 @@ export function AdminLocationsPage() {
                       <Badge variant="warning" dot>
                         Pending
                       </Badge>
-                      <Button
-                        size="sm"
-                        variant="success"
-                        loading={approveMutation.isPending}
-                        onClick={() => approveMutation.mutate(location.id)}
-                      >
-                        <Check />
-                        Approve
-                      </Button>
+                      {isSuperAdmin && (
+                        <Button
+                          size="sm"
+                          variant="success"
+                          loading={
+                            approveMutation.isPending &&
+                            approveMutation.variables === location.id
+                          }
+                          onClick={() => approveMutation.mutate(location.id)}
+                        >
+                          <Check />
+                          Approve
+                        </Button>
+                      )}
                     </li>
                   )
                 })}
@@ -460,20 +483,19 @@ export function AdminLocationsPage() {
                   </div>
                 )}
 
-                <Button
-                  className="w-full"
-                  onClick={() => setAddParentId(selected.id)}
-                  disabled={
-                    allowedChildTypes[selected.type].length === 0
-                  }
-                >
-                  <Plus />
-                  Add child location
-                </Button>
-                {allowedChildTypes[selected.type].length === 0 && (
+                {selectedChildTypes.length > 0 ? (
+                  <Button
+                    className="w-full"
+                    onClick={() => setAddParentId(selected.id)}
+                  >
+                    <Plus />
+                    Add child location
+                  </Button>
+                ) : (
                   <p className="text-xs text-ink-500">
-                    A {locationTypeLabels[selected.type].toLowerCase()} is the
-                    last level of the hierarchy.
+                    {allowedChildTypes[selected.type].length === 0
+                      ? `A ${locationTypeLabels[selected.type].toLowerCase()} is the last level of the hierarchy.`
+                      : 'Only a Super Admin can add a state under a country.'}
                   </p>
                 )}
               </div>
@@ -490,6 +512,7 @@ export function AdminLocationsPage() {
               ? null
               : (locations.find((l) => l.id === addParentId) ?? null)
           }
+          canCreateTopLevel={isSuperAdmin}
           onOpenChange={(open) => {
             if (!open) setAddParentId(null)
           }}
@@ -598,18 +621,24 @@ function TreeNode({
 
 function AddLocationDialog({
   parent,
+  canCreateTopLevel,
   onOpenChange,
 }: {
   parent: Location | null
+  canCreateTopLevel: boolean
   onOpenChange: (open: boolean) => void
 }) {
   const queryClient = useQueryClient()
+  const availableTypes = (
+    parent ? allowedChildTypes[parent.type] : (['country'] as LocationType[])
+  ).filter(
+    (child) =>
+      canCreateTopLevel || (child !== 'country' && child !== 'state'),
+  )
   // The dialog is mounted fresh each time it opens, so the default type is
   // derived from the selected parent without an effect.
-  const [type, setType] = React.useState<LocationType>(() =>
-    parent
-      ? (allowedChildTypes[parent.type][0] ?? parent.type)
-      : 'country',
+  const [type, setType] = React.useState<LocationType>(
+    () => availableTypes[0] ?? 'country',
   )
   const [name, setName] = React.useState('')
   const [code, setCode] = React.useState('')
@@ -690,7 +719,7 @@ function AddLocationDialog({
               invalid={typeError !== null}
               onChange={(e) => setType(e.target.value as LocationType)}
             >
-              {(Object.keys(locationTypeLabels) as LocationType[]).map((value) => (
+              {availableTypes.map((value) => (
                 <option key={value} value={value}>
                   {locationTypeLabels[value]}
                 </option>
@@ -763,7 +792,7 @@ function AddLocationDialog({
             type="submit"
             loading={createMutation.isPending}
             loadingText="Creating…"
-            disabled={typeError !== null}
+            disabled={typeError !== null || availableTypes.length === 0}
           >
             Create location
           </Button>

@@ -862,33 +862,128 @@ func (s *Store) ListNotifications(
 
 	items := make([]models.Notification, 0)
 	for rows.Next() {
-		var (
-			notification       models.Notification
-			rawID              string
-			rawTenantID        *string
-			rawRecipientUserID *string
-		)
-		if err := rows.Scan(
-			&rawID, &rawTenantID, &rawRecipientUserID,
-			&notification.RecipientContact, &notification.Channel,
-			&notification.TemplateKey, &notification.Payload,
-			&notification.ProviderRef, &notification.Status,
-			&notification.Error, &notification.SentAt, &notification.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		if notification.ID, err = uuid.Parse(rawID); err != nil {
-			return nil, err
-		}
-		if notification.TenantID, err = optionalUUID(rawTenantID); err != nil {
-			return nil, err
-		}
-		if notification.RecipientUserID, err = optionalUUID(rawRecipientUserID); err != nil {
+		notification, err := scanNotification(rows)
+		if err != nil {
 			return nil, err
 		}
 		items = append(items, notification)
 	}
 	return items, rows.Err()
+}
+
+// RetryNotification puts one permanently-failed delivery back on the queue.
+// Attempts are reset so the worker gets the full backoff allowance again.
+func (s *Store) RetryNotification(
+	ctx context.Context,
+	tenantID *uuid.UUID,
+	actorID *uuid.UUID,
+	id uuid.UUID,
+) (models.Notification, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return models.Notification{}, err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	var (
+		rawTenantID *string
+		status      string
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT tenant_id, status FROM notifications
+		WHERE id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)
+		FOR UPDATE`,
+		id, tenantID,
+	).Scan(&rawTenantID, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Notification{}, ErrNotFound
+	}
+	if err != nil {
+		return models.Notification{}, err
+	}
+	if status != "failed" {
+		return models.Notification{}, fmt.Errorf(
+			"%w: only failed notifications can be retried", ErrValidation,
+		)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE notifications
+		SET status = 'pending', attempts = 0, error = NULL,
+		    next_attempt_at = now()
+		WHERE id = $1`, id,
+	); err != nil {
+		return models.Notification{}, err
+	}
+
+	notificationTenant, err := optionalUUID(rawTenantID)
+	if err != nil {
+		return models.Notification{}, err
+	}
+	auditTenant := tenantID
+	if auditTenant == nil {
+		auditTenant = notificationTenant
+	}
+	if auditTenant != nil {
+		if err := insertAudit(ctx, tx, *auditTenant, actorID,
+			"notification.retried", "notification", id,
+			map[string]any{"status": status},
+			map[string]any{"status": "pending"},
+		); err != nil {
+			return models.Notification{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return models.Notification{}, err
+	}
+	return s.notificationByID(ctx, tenantID, id)
+}
+
+func (s *Store) notificationByID(
+	ctx context.Context,
+	tenantID *uuid.UUID,
+	id uuid.UUID,
+) (models.Notification, error) {
+	const q = `
+		SELECT id, tenant_id, recipient_user_id, recipient_contact, channel,
+		       template_key, payload, provider_ref, status, error, sent_at,
+		       created_at
+		FROM notifications
+		WHERE id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)`
+	notification, err := scanNotification(s.pool.QueryRow(ctx, q, id, tenantID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.Notification{}, ErrNotFound
+	}
+	return notification, err
+}
+
+func scanNotification(row rowScanner) (models.Notification, error) {
+	var (
+		notification       models.Notification
+		rawID              string
+		rawTenantID        *string
+		rawRecipientUserID *string
+	)
+	if err := row.Scan(
+		&rawID, &rawTenantID, &rawRecipientUserID,
+		&notification.RecipientContact, &notification.Channel,
+		&notification.TemplateKey, &notification.Payload,
+		&notification.ProviderRef, &notification.Status,
+		&notification.Error, &notification.SentAt, &notification.CreatedAt,
+	); err != nil {
+		return models.Notification{}, err
+	}
+	var err error
+	if notification.ID, err = uuid.Parse(rawID); err != nil {
+		return models.Notification{}, err
+	}
+	if notification.TenantID, err = optionalUUID(rawTenantID); err != nil {
+		return models.Notification{}, err
+	}
+	if notification.RecipientUserID, err = optionalUUID(rawRecipientUserID); err != nil {
+		return models.Notification{}, err
+	}
+	return notification, nil
 }
 
 // CreateInterview publishes (or drafts) an interview announcement.

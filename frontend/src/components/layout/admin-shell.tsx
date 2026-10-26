@@ -174,7 +174,9 @@ export function AdminShell() {
             <span className="font-medium text-ink-400">Admin</span>
             <span className="text-ink-300">/</span>
             <span className="font-medium text-ink-700">
-              {tenantName ?? 'All states'}
+              {user?.role === 'super_admin'
+                ? 'All states'
+                : (tenantName ?? 'All states')}
             </span>
             <span className="inline-flex items-center rounded-full bg-ink-100 px-2 py-0.5 text-2xs font-medium text-ink-600">
               {user?.role === 'super_admin' ? 'Group scope' : 'State scope'}

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
   CalendarClock,
@@ -11,13 +11,15 @@ import {
   Mail,
   MapPin,
   MessageSquareText,
+  Pencil,
   Phone,
   Sparkles,
   User,
 } from 'lucide-react'
+import * as React from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { buttonVariants } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -25,7 +27,17 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { EmptyState, Spinner } from '@/components/ui/empty-state'
+import { Field, Input, Select } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import { ApplicationStatusBadge } from '@/components/ui/status-badges'
 import { locationPath, publicApi } from '@/lib/api'
@@ -33,7 +45,11 @@ import { cn } from '@/lib/cn'
 import { formatDate, formatDateTime, fullName } from '@/lib/format'
 import { useNow } from '@/lib/use-now'
 import { useSession } from '@/providers/session-provider'
-import type { ApplicationEvent, ApplicationStatus } from '@/types/domain'
+import type {
+  Application,
+  ApplicationEvent,
+  ApplicationStatus,
+} from '@/types/domain'
 
 /** Canonical stages of the recruitment pipeline, in order. */
 type StageKey = 'pending' | 'shortlisted' | 'appointed' | 'rejected' | 'withdrawn'
@@ -92,6 +108,7 @@ export function ApplicantStatusPage() {
 
   const application = applicationQuery.data
   const now = useNow()
+  const [editOpen, setEditOpen] = React.useState(false)
 
   if (applicationQuery.isLoading) return <Spinner />
 
@@ -140,7 +157,19 @@ export function ApplicantStatusPage() {
         title={application.job_title ?? 'Application'}
         description={`Submitted on ${formatDate(application.submitted_at)}. Your application number is quoted in every message from the recruitment team.`}
         actions={
-          <ApplicationStatusBadge status={application.status} />
+          <div className="flex items-center gap-2">
+            <ApplicationStatusBadge status={application.status} />
+            {application.status === 'pending' && (
+              <Button
+                variant="outline"
+                onClick={() => setEditOpen(true)}
+                aria-label="Edit your application"
+              >
+                <Pencil aria-hidden />
+                Edit
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -340,7 +369,216 @@ export function ApplicantStatusPage() {
           </dl>
         </CardContent>
       </Card>
+
+      {/* BR-10: editable only while pending; the server enforces the lock. */}
+      {application.status === 'pending' && editOpen && (
+        <EditApplicationDialog
+          application={application}
+          open
+          onOpenChange={setEditOpen}
+        />
+      )}
     </div>
+  )
+}
+
+/**
+ * Edit dialog for a still-pending application (BR-10). The location is not
+ * editable here; the recruitment team handles location corrections.
+ */
+function EditApplicationDialog({
+  application,
+  open,
+  onOpenChange,
+}: {
+  application: Application
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+  const [firstName, setFirstName] = React.useState(application.first_name)
+  const [lastName, setLastName] = React.useState(application.last_name)
+  const [phone, setPhone] = React.useState(application.phone)
+  const [gender, setGender] = React.useState(
+    (application.gender ?? 'male').toLowerCase(),
+  )
+  const [dateOfBirth, setDateOfBirth] = React.useState(
+    application.date_of_birth ? application.date_of_birth.slice(0, 10) : '',
+  )
+  const [addressLine, setAddressLine] = React.useState(
+    application.address_line ?? '',
+  )
+  const [qualification, setQualification] = React.useState(
+    application.qualification ?? '',
+  )
+  const [photo, setPhoto] = React.useState<File | undefined>(undefined)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      publicApi.editMyApplication(application.id, {
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        phone: phone.trim(),
+        gender,
+        date_of_birth: dateOfBirth,
+        address_line: addressLine.trim(),
+        qualification: qualification.trim(),
+        photo,
+      }),
+    onSuccess: () => {
+      toast.success('Application updated')
+      void queryClient.invalidateQueries({ queryKey: ['applicant'] })
+      onOpenChange(false)
+    },
+    onError: (cause: Error) => setError(cause.message),
+  })
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError(null)
+    if (!firstName.trim() || !lastName.trim()) {
+      setError('First and last name are required.')
+      return
+    }
+    if (phone.trim().length < 7) {
+      setError('Enter a valid phone number.')
+      return
+    }
+    if (!dateOfBirth || Number.isNaN(Date.parse(dateOfBirth))) {
+      setError('Enter a valid date of birth.')
+      return
+    }
+    if (photo && photo.size > 2 * 1024 * 1024) {
+      setError('The photograph must be 2 MB or smaller.')
+      return
+    }
+    mutation.mutate()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <form onSubmit={submit} noValidate>
+        <DialogHeader>
+          <div>
+            <DialogTitle>Edit your application</DialogTitle>
+            <DialogDescription>
+              Corrections are accepted while the application is pending. Once
+              it is shortlisted the record is locked.
+            </DialogDescription>
+          </div>
+          <DialogClose />
+        </DialogHeader>
+
+        <DialogBody className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="First name" htmlFor="edit-first-name" required>
+              <Input
+                id="edit-first-name"
+                value={firstName}
+                onChange={(event) => setFirstName(event.target.value)}
+              />
+            </Field>
+            <Field label="Last name" htmlFor="edit-last-name" required>
+              <Input
+                id="edit-last-name"
+                value={lastName}
+                onChange={(event) => setLastName(event.target.value)}
+              />
+            </Field>
+          </div>
+
+          <Field label="Phone number" htmlFor="edit-phone" required>
+            <Input
+              id="edit-phone"
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+            />
+          </Field>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Gender" htmlFor="edit-gender" required>
+              <Select
+                id="edit-gender"
+                value={gender}
+                onChange={(event) => setGender(event.target.value)}
+              >
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+              </Select>
+            </Field>
+            <Field label="Date of birth" htmlFor="edit-dob" required>
+              <Input
+                id="edit-dob"
+                type="date"
+                value={dateOfBirth}
+                onChange={(event) => setDateOfBirth(event.target.value)}
+              />
+            </Field>
+          </div>
+
+          <Field label="Residential address" htmlFor="edit-address" required>
+            <Input
+              id="edit-address"
+              value={addressLine}
+              onChange={(event) => setAddressLine(event.target.value)}
+            />
+          </Field>
+
+          <Field
+            label="Highest qualification"
+            htmlFor="edit-qualification"
+            required
+          >
+            <Input
+              id="edit-qualification"
+              value={qualification}
+              onChange={(event) => setQualification(event.target.value)}
+            />
+          </Field>
+
+          <Field
+            label="Replace photograph"
+            htmlFor="edit-photo"
+            hint="Optional. PNG, JPG or WEBP, up to 2 MB."
+          >
+            <Input
+              id="edit-photo"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={(event) => setPhoto(event.target.files?.[0])}
+            />
+          </Field>
+
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-md border border-danger-200 bg-danger-50 px-3 py-2 text-xs text-danger-700"
+            >
+              {error}
+            </p>
+          ) : null}
+        </DialogBody>
+
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            loading={mutation.isPending}
+            loadingText="Saving…"
+          >
+            Save changes
+          </Button>
+        </DialogFooter>
+      </form>
+    </Dialog>
   )
 }
 

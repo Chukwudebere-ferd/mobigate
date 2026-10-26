@@ -138,3 +138,50 @@ func (s *Store) TenantByID(ctx context.Context, id string) (models.Tenant, error
 	}
 	return tenant, nil
 }
+
+// ListTenants returns the active tenant scopes a Super Admin can assign to a
+// delegated Admin. Tenant names carry the state label used by the UI.
+func (s *Store) ListTenants(ctx context.Context) ([]models.Tenant, error) {
+	const q = `
+		SELECT id, name, state_location_id, status, created_at
+		FROM tenants
+		WHERE status = 'active'
+		ORDER BY name`
+
+	rows, err := s.pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]models.Tenant, 0)
+	for rows.Next() {
+		var (
+			tenant           models.Tenant
+			rawID            string
+			rawStateLocation *string
+		)
+		if err := rows.Scan(
+			&rawID,
+			&tenant.Name,
+			&rawStateLocation,
+			&tenant.Status,
+			&tenant.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		tenant.ID, err = uuid.Parse(rawID)
+		if err != nil {
+			return nil, err
+		}
+		if rawStateLocation != nil {
+			stateLocationID, parseErr := uuid.Parse(*rawStateLocation)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			tenant.StateLocationID = &stateLocationID
+		}
+		items = append(items, tenant)
+	}
+	return items, rows.Err()
+}

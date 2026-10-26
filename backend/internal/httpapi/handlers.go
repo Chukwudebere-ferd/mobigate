@@ -85,6 +85,7 @@ func (h *Handler) Register(r chi.Router) {
 		r.Put("/onboarding/draft", h.saveOnboardingDraft)
 		r.Post("/onboarding", h.completeOnboarding)
 		r.Get("/me", h.staffMe)
+		r.Get("/documents/{id}", h.staffDocumentURL)
 	})
 
 	r.Route("/admin", func(r chi.Router) {
@@ -190,6 +191,7 @@ func (h *Handler) registerAdminRoutes(r chi.Router) {
 
 	r.Get("/departments", h.listDepartments)
 	r.Post("/departments", h.createDepartment)
+	r.Get("/tenants", h.listTenants)
 	r.Get("/users", h.listUsers)
 	r.Post("/users", h.createAdminUser)
 	r.Patch("/users/{id}", h.updateUser)
@@ -198,6 +200,7 @@ func (h *Handler) registerAdminRoutes(r chi.Router) {
 	r.Patch("/templates/{id}", h.updateTemplate)
 	r.Post("/templates/{id}/test", h.testTemplate)
 	r.Get("/notifications", h.listNotifications)
+	r.Post("/notifications/{id}/retry", h.retryNotification)
 	r.Get("/audit-logs", h.listAuditLogs)
 }
 
@@ -515,6 +518,11 @@ func (h *Handler) listDepartments(w http.ResponseWriter, r *http.Request) {
 	h.listDepartmentsAdmin(w, r)
 }
 
+func (h *Handler) listTenants(w http.ResponseWriter, r *http.Request) {
+	// GET /admin/tenants -> 200 { "items": Tenant[] }
+	h.listTenantsAdmin(w, r)
+}
+
 func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/users -> 200 { "items": User[] }
 	h.listUsersAdmin(w, r)
@@ -533,6 +541,11 @@ func (h *Handler) listTemplates(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listNotifications(w http.ResponseWriter, r *http.Request) {
 	// GET /admin/notifications -> 200 { "items": Notification[] }
 	h.listNotificationsAdmin(w, r)
+}
+
+func (h *Handler) retryNotification(w http.ResponseWriter, r *http.Request) {
+	// POST /admin/notifications/{id}/retry -> 200 Notification
+	h.retryNotificationAdmin(w, r)
 }
 
 func (h *Handler) listAuditLogs(w http.ResponseWriter, r *http.Request) {

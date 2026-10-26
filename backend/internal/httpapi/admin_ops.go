@@ -269,6 +269,18 @@ func (h *Handler) listUsersAdmin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+func (h *Handler) listTenantsAdmin(w http.ResponseWriter, r *http.Request) {
+	if !requireSuperAdmin(w, r) {
+		return
+	}
+	items, err := h.Store.ListTenants(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load tenants")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (h *Handler) approveUserAdmin(w http.ResponseWriter, r *http.Request) {
 	if !requireSuperAdmin(w, r) {
 		return
@@ -297,6 +309,26 @@ func (h *Handler) listNotificationsAdmin(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) retryNotificationAdmin(w http.ResponseWriter, r *http.Request) {
+	scope, ok := h.adminScope(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "notification not found")
+		return
+	}
+	notification, err := h.Store.RetryNotification(
+		r.Context(), scope, adminActorID(r), id,
+	)
+	if err != nil {
+		writeStoreError(w, err, "could not retry the notification")
+		return
+	}
+	writeJSON(w, http.StatusOK, notification)
 }
 
 func (h *Handler) createInterviewAdmin(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +439,11 @@ func (h *Handler) createLocationAdmin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid location type")
 		return
 	}
+	if (locationType == models.LocationCountry ||
+		locationType == models.LocationState) && !isSuperAdmin(r) {
+		writeError(w, http.StatusForbidden, "super admin access required")
+		return
+	}
 	name := strings.TrimSpace(payload.Name)
 	if name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
@@ -429,8 +466,22 @@ func (h *Handler) createLocationAdmin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tenantID := scope
-	if tenantID == nil {
+	// Countries and states are global tree nodes. A Super Admin creating a
+	// lower-level location under a tenant-owned parent inherits that tenant;
+	// otherwise it falls back to the caller's tenant.
+	var tenantID *uuid.UUID
+	switch {
+	case locationType == models.LocationCountry || locationType == models.LocationState:
+		tenantID = nil
+	case scope != nil:
+		tenantID = scope
+	case parentID != nil:
+		if parent, err := h.Store.GetLocation(r.Context(), nil, *parentID); err == nil {
+			tenantID = parent.TenantID
+		}
+	}
+	if tenantID == nil && locationType != models.LocationCountry &&
+		locationType != models.LocationState {
 		tenantID = adminTenantID(r)
 	}
 	location, err := h.Store.CreateLocation(
@@ -444,6 +495,9 @@ func (h *Handler) createLocationAdmin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) approveLocationAdmin(w http.ResponseWriter, r *http.Request) {
+	if !requireSuperAdmin(w, r) {
+		return
+	}
 	scope, ok := h.adminScope(w, r)
 	if !ok {
 		return
@@ -700,11 +754,12 @@ func (h *Handler) createAdminUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var payload struct {
-		FirstName string `json:"first_name"`
-		LastName  string `json:"last_name"`
-		Email     string `json:"email"`
-		Password  string `json:"password"`
-		Role      string `json:"role"`
+		FirstName string  `json:"first_name"`
+		LastName  string  `json:"last_name"`
+		Email     string  `json:"email"`
+		Password  string  `json:"password"`
+		Role      string  `json:"role"`
+		TenantID  *string `json:"tenant_id"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -713,11 +768,11 @@ func (h *Handler) createAdminUser(w http.ResponseWriter, r *http.Request) {
 	payload.FirstName = strings.TrimSpace(payload.FirstName)
 	payload.LastName = strings.TrimSpace(payload.LastName)
 	payload.Email = strings.ToLower(strings.TrimSpace(payload.Email))
-	role := models.UserRole(payload.Role)
-	if role != models.RoleAdmin && role != models.RoleStaff {
-		writeError(w, http.StatusBadRequest, "role must be admin or staff")
+	if payload.Role != "" && models.UserRole(payload.Role) != models.RoleAdmin {
+		writeError(w, http.StatusBadRequest, "only admin accounts can be invited here")
 		return
 	}
+	role := models.RoleAdmin
 	if payload.FirstName == "" || payload.LastName == "" || payload.Email == "" {
 		writeError(w, http.StatusBadRequest, "name and email are required")
 		return
@@ -726,21 +781,33 @@ func (h *Handler) createAdminUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
 		return
 	}
-	tenantID := adminTenantID(r)
+
+	var tenantID *uuid.UUID
+	if payload.TenantID != nil && strings.TrimSpace(*payload.TenantID) != "" {
+		parsed, err := uuid.Parse(strings.TrimSpace(*payload.TenantID))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid tenant_id")
+			return
+		}
+		tenant, err := h.Store.TenantByID(r.Context(), parsed.String())
+		if err != nil || tenant.Status != "active" {
+			writeError(w, http.StatusBadRequest, "choose an active state scope")
+			return
+		}
+		tenantID = &parsed
+	} else {
+		tenantID = adminTenantID(r)
+	}
 	if tenantID == nil {
 		writeError(w, http.StatusForbidden, "account has no tenant scope")
 		return
 	}
 
-	authRole := "admin"
-	if role == models.RoleStaff {
-		authRole = "user"
-	}
 	body := map[string]any{
 		"email":    payload.Email,
 		"password": payload.Password,
 		"name":     payload.FirstName + " " + payload.LastName,
-		"role":     authRole,
+		"role":     "admin",
 		"data": map[string]any{
 			"tenantId": tenantID.String(),
 		},
@@ -888,4 +955,9 @@ func requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+func isSuperAdmin(r *http.Request) bool {
+	session, ok := auth.FromContext(r.Context())
+	return ok && session.User.Role == models.RoleSuperAdmin
 }

@@ -4,7 +4,7 @@ import {
   Briefcase,
   CalendarClock,
   CheckCircle2,
-  FileCheck2,
+  Download,
   FileText,
   IdCard,
   Landmark,
@@ -18,7 +18,9 @@ import {
   UserRoundCheck,
   Users,
 } from 'lucide-react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
 import { buttonVariants } from '@/components/ui/button'
 import {
   Card,
@@ -37,6 +39,7 @@ import { staffApi } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatBytes, formatDate, formatDateTime } from '@/lib/format'
 import { useSession } from '@/providers/session-provider'
+import type { StaffDocument } from '@/types/domain'
 
 export function StaffPortalPage() {
   const { session } = useSession()
@@ -341,29 +344,7 @@ export function StaffPortalPage() {
             ) : (
               <ul className="divide-y divide-ink-100">
                 {documents.map((document) => (
-                  <li
-                    key={document.id}
-                    className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
-                  >
-                    <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-ink-100 ring-1 ring-ink-200">
-                      <FileText
-                        className="size-4.5 text-ink-600"
-                        aria-hidden
-                      />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-ink-900">
-                        {document.file_name}
-                      </p>
-                      <p className="text-xs text-ink-500">
-                        {document.category} · {formatBytes(document.size_bytes)}
-                      </p>
-                    </div>
-                    <FileCheck2
-                      className="size-4 shrink-0 text-success-600"
-                      aria-hidden
-                    />
-                  </li>
+                  <DocumentRow key={document.id} document={document} />
                 ))}
               </ul>
             )}
@@ -471,5 +452,51 @@ function Detail({
         <dd className="text-sm break-words text-ink-900">{value}</dd>
       </div>
     </div>
+  )
+}
+
+/**
+ * One document row. The list only carries metadata; the file itself is
+ * fetched on demand through a short-lived signed URL (never a public link).
+ */
+function DocumentRow({ document }: { document: StaffDocument }) {
+  const [opening, setOpening] = useState(false)
+
+  async function open() {
+    setOpening(true)
+    try {
+      const { url } = await staffApi.documentURL(document.id)
+      window.open(url, '_blank', 'noopener,noreferrer')
+    } catch {
+      toast.error('The document could not be opened. Please try again.')
+    } finally {
+      setOpening(false)
+    }
+  }
+
+  return (
+    <li className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-ink-100 ring-1 ring-ink-200">
+        <FileText className="size-4.5 text-ink-600" aria-hidden />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium text-ink-900">
+          {document.file_name}
+        </p>
+        <p className="text-xs text-ink-500">
+          {document.category} · {formatBytes(document.size_bytes)}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => void open()}
+        disabled={opening}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium text-brand-700 transition-colors hover:bg-brand-50 disabled:opacity-60"
+        aria-label={`Open ${document.file_name}`}
+      >
+        <Download className="size-3.5" aria-hidden />
+        {opening ? 'Opening…' : 'Open'}
+      </button>
+    </li>
   )
 }

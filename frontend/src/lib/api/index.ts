@@ -39,6 +39,7 @@ import type {
   StaffProfile,
   StaffRedemption,
   StaffStatus,
+  Tenant,
   User,
 } from '@/types/domain'
 
@@ -129,6 +130,20 @@ export interface ApplicationSubmission {
   photo?: File
 }
 
+/** Applicant edits to a still-pending application (BR-10). */
+export interface ApplicationEditSubmission {
+  first_name: string
+  last_name: string
+  phone: string
+  gender: string
+  /** YYYY-MM-DD for the date input. */
+  date_of_birth: string
+  address_line: string
+  qualification: string
+  /** Optional replacement photograph. */
+  photo?: File
+}
+
 export const publicApi = {
   /** GET /public/jobs — published roles for the careers site. */
   async listJobs(): Promise<Job[]> {
@@ -209,6 +224,27 @@ export const publicApi = {
     return http.post<Application>(`/me/applications/${id}/withdraw`, body)
   },
 
+  /**
+   * PATCH /me/applications/{id}: edit a pending application (BR-10). The
+   * backend rejects edits once the application has been shortlisted. The
+   * location is intentionally not editable here.
+   */
+  async editMyApplication(
+    id: string,
+    payload: ApplicationEditSubmission,
+  ): Promise<Application> {
+    const form = new FormData()
+    form.set('first_name', payload.first_name)
+    form.set('last_name', payload.last_name)
+    form.set('phone', payload.phone)
+    form.set('gender', payload.gender)
+    form.set('date_of_birth', payload.date_of_birth)
+    form.set('address_line', payload.address_line)
+    form.set('qualification', payload.qualification)
+    if (payload.photo) form.set('photo', payload.photo)
+    return http.patch<Application>(`/me/applications/${id}`, form)
+  },
+
   /** GET /me/applications/{id}/shortlist — 404 when none is active (BR-08). */
   async shortlistMessageFor(applicationId: string): Promise<Shortlist> {
     return http.get<Shortlist>(`/me/applications/${applicationId}/shortlist`)
@@ -265,6 +301,21 @@ export const staffApi = {
   /** GET /staff/me — the completed staff record and its documents. */
   async me(): Promise<StaffMeResponse> {
     return http.get<StaffMeResponse>('/staff/me')
+  },
+
+  /**
+   * GET /staff/documents/{id} — a short-lived signed URL for one of the
+   * caller's own documents. Ownership is enforced server-side.
+   */
+  async documentURL(
+    id: string,
+  ): Promise<{ url: string; file_name: string; mime_type: string; expires_in: number }> {
+    return http.get<{
+      url: string
+      file_name: string
+      mime_type: string
+      expires_in: number
+    }>(`/staff/documents/${id}`)
   },
 }
 
@@ -465,6 +516,11 @@ export const adminApi = {
     return http.post<Department>('/admin/departments', { name })
   },
 
+  async listTenants(): Promise<Tenant[]> {
+    const response = await http.get<{ items: Tenant[] }>('/admin/tenants')
+    return response.items
+  },
+
   async listUsers(): Promise<User[]> {
     const response = await http.get<{ items: User[] }>('/admin/users')
     return response.items
@@ -486,7 +542,8 @@ export const adminApi = {
     last_name: string
     email: string
     password: string
-    role: 'admin' | 'staff'
+    role: 'admin'
+    tenant_id: string
   }): Promise<User> {
     return http.post<User>('/admin/users', payload)
   },
@@ -532,6 +589,10 @@ export const adminApi = {
       '/admin/notifications',
     )
     return response.items
+  },
+
+  async retryNotification(id: string): Promise<Notification> {
+    return http.post<Notification>(`/admin/notifications/${id}/retry`, {})
   },
 
   async listAuditLogs(): Promise<AuditLog[]> {

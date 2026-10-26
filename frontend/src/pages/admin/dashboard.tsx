@@ -11,6 +11,7 @@ import {
   TrendingUp,
   UserPlus,
   Users,
+  UserX,
 } from 'lucide-react'
 import * as React from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -74,9 +75,9 @@ const toneStyles: Record<Tone, { icon: string; value: string; chip: string }> = 
   },
 }
 
-type Range = '7d' | '30d' | '90d'
+type Range = '7d' | '30d'
 
-const RANGE_DAYS: Record<Range, number> = { '7d': 7, '30d': 30, '90d': 90 }
+const RANGE_DAYS: Record<Range, number> = { '7d': 7, '30d': 30 }
 
 interface MetricTile {
   label: string
@@ -115,12 +116,12 @@ function TrendTooltip({ active, payload, label }: TooltipContentProps) {
 }
 
 export function AdminDashboardPage() {
-  const { tenantName } = useSession()
-  const scopeLabel = tenantName ?? 'all states'
+  const { role, tenantName } = useSession()
+  const scopeLabel =
+    role === 'super_admin' ? 'all states' : (tenantName ?? 'all states')
   const [searchParams, setSearchParams] = useSearchParams()
   const rangeParam = searchParams.get('range')
-  const range: Range =
-    rangeParam === '7d' || rangeParam === '90d' ? rangeParam : '30d'
+  const range: Range = rangeParam === '7d' ? '7d' : '30d'
 
   function setRange(next: Range) {
     const params = new URLSearchParams(searchParams)
@@ -154,7 +155,7 @@ export function AdminDashboardPage() {
       : undefined
   const now = useNow()
 
-  // The API exposes a rolling 30-day series; longer ranges simply cover it all.
+  // The API exposes a rolling 30-day series; the short range trims it.
   const window = RANGE_DAYS[range]
   const trend = metrics
     ? metrics.applications_trend.slice(
@@ -217,6 +218,15 @@ export function AdminDashboardPage() {
           icon: UserPlus,
           fact: 'Awaiting appointment',
           sub: 'Confirmation message sent',
+        },
+        {
+          label: 'Rejected',
+          value: metrics.rejected,
+          to: '/admin/applications?status=rejected',
+          tone: 'warning',
+          icon: UserX,
+          fact: 'Reason recorded',
+          sub: 'Closed from the candidate pipeline',
         },
         {
           label: 'Appointed',
@@ -284,7 +294,6 @@ export function AdminDashboardPage() {
             >
               <option value="7d">Last 7 days</option>
               <option value="30d">Last 30 days</option>
-              <option value="90d">Last 90 days</option>
             </Select>
             <Link to="/admin/jobs" className={buttonVariants({})}>
               <Plus />
@@ -300,7 +309,7 @@ export function AdminDashboardPage() {
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
       >
         {dashboardQuery.isLoading &&
-          Array.from({ length: 8 }).map((_, index) => (
+          Array.from({ length: 9 }).map((_, index) => (
             <div
               key={index}
               className="h-32 animate-pulse rounded-xl border border-ink-200 bg-white"

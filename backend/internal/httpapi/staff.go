@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mobigate/mgm-portal/internal/models"
+	"github.com/mobigate/mgm-portal/internal/storage"
 	"github.com/mobigate/mgm-portal/internal/store"
 )
 
@@ -348,6 +349,56 @@ func (h *Handler) staffMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"staff":     profile,
 		"documents": items,
+	})
+}
+
+// staffDocumentURL handles GET /staff/documents/{id}: a short-lived signed URL
+// for one of the caller's own documents. Ownership is checked before the
+// storage key is read; another staff member's document is a 404 (BR-15).
+func (h *Handler) staffDocumentURL(w http.ResponseWriter, r *http.Request) {
+	session, ok := h.publicSession(w, r)
+	if !ok {
+		return
+	}
+	userID, ok := sessionUserID(w, session)
+	if !ok {
+		return
+	}
+	if !h.requireStore(w) {
+		return
+	}
+	if h.Storage == nil || !h.Storage.Configured() {
+		writeError(w, http.StatusServiceUnavailable, "document downloads are not configured")
+		return
+	}
+	id, ok := h.uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	profile, err := h.Store.StaffByUserID(r.Context(), userID)
+	if err != nil {
+		translateStoreError(w, err)
+		return
+	}
+	document, err := h.Store.DocumentByID(r.Context(), id)
+	if err != nil {
+		translateStoreError(w, err)
+		return
+	}
+	if document.OwnerType != "staff" || document.OwnerID != profile.ID {
+		writeError(w, http.StatusNotFound, "document not found")
+		return
+	}
+	url, err := h.Storage.SignedURL(r.Context(), document.StorageKey)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "the document could not be opened; try again")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"url":        url,
+		"file_name":  document.FileName,
+		"mime_type":  document.MimeType,
+		"expires_in": int(storage.SignedURLTTL.Seconds()),
 	})
 }
 

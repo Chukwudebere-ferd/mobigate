@@ -84,6 +84,15 @@ export interface User {
   created_at: string
 }
 
+/** A state-scoped tenant a Super Admin can assign to a delegated Admin. */
+export interface Tenant {
+  id: string
+  name: string
+  state_location_id: string | null
+  status: string
+  created_at: string
+}
+
 export interface Location {
   id: string
   tenant_id: string | null

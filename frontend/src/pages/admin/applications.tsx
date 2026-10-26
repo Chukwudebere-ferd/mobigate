@@ -9,6 +9,7 @@ import {
   Search,
   Send,
   TriangleAlert,
+  UserCheck,
   UserX,
   X,
 } from 'lucide-react'
@@ -519,6 +520,139 @@ function RejectDialog({
   )
 }
 
+function AppointDialog({
+  open,
+  onOpenChange,
+  applications,
+  onCompleted,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  applications: Application[]
+  onCompleted: () => void
+}) {
+  const queryClient = useQueryClient()
+  const eligible = applications.filter(
+    (application) =>
+      application.status === 'pending' ||
+      application.status === 'shortlisted',
+  )
+  const skipped = applications.length - eligible.length
+
+  const appointMutation = useMutation({
+    mutationFn: (ids: string[]) =>
+      Promise.all(
+        ids.map((id) => adminApi.setApplicationStatus(id, 'appointed')),
+      ),
+    onSuccess: async (_result, ids) => {
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'applications'] })
+      await queryClient.invalidateQueries({ queryKey: ['admin', 'application'] })
+      toast.success(
+        `${ids.length} candidate${ids.length === 1 ? '' : 's'} appointed.`,
+      )
+      onCompleted()
+      onOpenChange(false)
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Could not appoint the selected candidates.',
+      )
+    },
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogHeader>
+        <div className="min-w-0">
+          <DialogTitle>
+            Appoint {eligible.length} candidate
+            {eligible.length === 1 ? '' : 's'}
+          </DialogTitle>
+          <DialogDescription>
+            Appointed candidates move to onboarding and can be issued a staff
+            access code.
+          </DialogDescription>
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => onOpenChange(false)}
+          aria-label="Close appoint dialog"
+        >
+          <X />
+        </Button>
+      </DialogHeader>
+
+      <DialogBody className="space-y-4">
+        {eligible.length > 0 ? (
+          <div className="rounded-lg border border-ink-200 bg-ink-50 px-3 py-2.5">
+            <p className="text-sm text-ink-800">
+              {eligible.length} eligible candidate
+              {eligible.length === 1 ? '' : 's'} selected
+            </p>
+            <p className="mt-1 text-2xs text-ink-500">
+              {eligible
+                .slice(0, 4)
+                .map(
+                  (application) =>
+                    `${application.first_name} ${application.last_name}`,
+                )
+                .join(', ')}
+              {eligible.length > 4 ? ` and ${eligible.length - 4} more` : ''}
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2.5">
+            <p className="text-sm text-warning-900">
+              None of the selected applications can be appointed. Only pending
+              or shortlisted applications are eligible.
+            </p>
+          </div>
+        )}
+
+        {skipped > 0 && eligible.length > 0 ? (
+          <div className="flex items-start gap-2 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2.5">
+            <TriangleAlert
+              className="mt-0.5 size-4 shrink-0 text-warning-700"
+              aria-hidden
+            />
+            <p className="text-xs text-warning-900">
+              {skipped} selected application{skipped === 1 ? '' : 's'} will be
+              skipped because they are already appointed, rejected or withdrawn.
+            </p>
+          </div>
+        ) : null}
+      </DialogBody>
+
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => onOpenChange(false)}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="button"
+          variant="success"
+          onClick={() =>
+            appointMutation.mutate(eligible.map((application) => application.id))
+          }
+          disabled={eligible.length === 0}
+          loading={appointMutation.isPending}
+          loadingText="Appointing…"
+        >
+          <UserCheck />
+          Appoint
+        </Button>
+      </DialogFooter>
+    </Dialog>
+  )
+}
+
 function ApplicationDrawer({
   application,
   onClose,
@@ -785,6 +919,7 @@ export function AdminApplicationsPage() {
   const [detail, setDetail] = useState<Application | null>(null)
   const [shortlistOpen, setShortlistOpen] = useState(false)
   const [rejectOpen, setRejectOpen] = useState(false)
+  const [appointOpen, setAppointOpen] = useState(false)
   const [exporting, setExporting] = useState(false)
 
   const filters = useMemo(() => {
@@ -1354,6 +1489,15 @@ export function AdminApplicationsPage() {
               </Button>
               <Button
                 type="button"
+                variant="success"
+                size="sm"
+                onClick={() => setAppointOpen(true)}
+              >
+                <UserCheck />
+                Appoint selected
+              </Button>
+              <Button
+                type="button"
                 variant="danger-outline"
                 size="sm"
                 onClick={() => setRejectOpen(true)}
@@ -1386,6 +1530,13 @@ export function AdminApplicationsPage() {
       <RejectDialog
         open={rejectOpen}
         onOpenChange={setRejectOpen}
+        applications={selectedList}
+        onCompleted={clearSelection}
+      />
+
+      <AppointDialog
+        open={appointOpen}
+        onOpenChange={setAppointOpen}
         applications={selectedList}
         onCompleted={clearSelection}
       />

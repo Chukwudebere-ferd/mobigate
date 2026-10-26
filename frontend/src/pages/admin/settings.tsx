@@ -13,6 +13,7 @@ import {
   Mail,
   MessageSquare,
   Pencil,
+  RefreshCw,
   Send,
   ShieldCheck,
   UserCheck,
@@ -50,6 +51,7 @@ import { UserStatusBadge } from '@/components/ui/status-badges'
 import { adminApi } from '@/lib/api'
 import { cn } from '@/lib/cn'
 import { formatDate, formatDateTime, fullName } from '@/lib/format'
+import { useSession } from '@/providers/session-provider'
 import type {
   MessageTemplate,
   Notification,
@@ -103,6 +105,9 @@ const notificationStatusTone: Record<
 }
 
 export function AdminSettingsPage() {
+  const { role } = useSession()
+  const isSuperAdmin = role === 'super_admin'
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -116,7 +121,9 @@ export function AdminSettingsPage() {
           <TabsTrigger value="confirmation">Confirmation messages</TabsTrigger>
           <TabsTrigger value="email">Email templates</TabsTrigger>
           <TabsTrigger value="codes">Access code settings</TabsTrigger>
-          <TabsTrigger value="users">Users &amp; admins</TabsTrigger>
+          {isSuperAdmin && (
+            <TabsTrigger value="users">Users &amp; admins</TabsTrigger>
+          )}
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
         </TabsList>
 
@@ -129,9 +136,11 @@ export function AdminSettingsPage() {
         <TabsContent value="codes" className="pt-5">
           <AccessCodeSettings />
         </TabsContent>
-        <TabsContent value="users" className="pt-5">
-          <UsersAndAdmins />
-        </TabsContent>
+        {isSuperAdmin && (
+          <TabsContent value="users" className="pt-5">
+            <UsersAndAdmins />
+          </TabsContent>
+        )}
         <TabsContent value="notifications" className="pt-5">
           <NotificationLog />
         </TabsContent>
@@ -834,7 +843,14 @@ function InviteAdminDialog({
   const [lastName, setLastName] = React.useState('')
   const [email, setEmail] = React.useState('')
   const [password, setPassword] = React.useState('')
-  const [role, setRole] = React.useState<'admin' | 'staff'>('admin')
+  const [tenantId, setTenantId] = React.useState('')
+
+  const tenantsQuery = useQuery({
+    queryKey: ['tenants'],
+    queryFn: () => adminApi.listTenants(),
+  })
+  const tenants = tenantsQuery.data ?? []
+  const selectedTenantId = tenantId || (tenants.length === 1 ? tenants[0].id : '')
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -843,7 +859,8 @@ function InviteAdminDialog({
         last_name: lastName.trim(),
         email: email.trim(),
         password,
-        role,
+        role: 'admin',
+        tenant_id: selectedTenantId,
       }),
     onSuccess: onCreated,
     onError: (error: unknown) => {
@@ -857,16 +874,17 @@ function InviteAdminDialog({
     firstName.trim().length > 0 &&
     lastName.trim().length > 0 &&
     email.trim().length > 0 &&
-    password.length >= 8
+    password.length >= 8 &&
+    selectedTenantId.length > 0
 
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogHeader>
         <div>
-          <DialogTitle>Invite an account</DialogTitle>
+          <DialogTitle>Invite an admin</DialogTitle>
           <DialogDescription>
-            Creates the login immediately. The new account stays pending until
-            a Super Admin approves it.
+            Creates an Admin login in the selected state. The account stays
+            pending until a Super Admin approves it.
           </DialogDescription>
         </div>
         <DialogClose onClick={onClose} />
@@ -897,14 +915,30 @@ function InviteAdminDialog({
           />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Role" htmlFor="invite-role" required>
+          <Field
+            label="State scope"
+            htmlFor="invite-tenant"
+            required
+            hint="The Admin will only see records in this state."
+          >
             <Select
-              id="invite-role"
-              value={role}
-              onChange={(e) => setRole(e.target.value as 'admin' | 'staff')}
+              id="invite-tenant"
+              value={selectedTenantId}
+              disabled={tenantsQuery.isLoading || tenants.length === 0}
+              onChange={(e) => setTenantId(e.target.value)}
             >
-              <option value="admin">Admin</option>
-              <option value="staff">Staff</option>
+              <option value="">
+                {tenantsQuery.isLoading
+                  ? 'Loading states…'
+                  : tenants.length === 0
+                    ? 'No active states available'
+                    : 'Select a state'}
+              </option>
+              {tenants.map((tenant) => (
+                <option key={tenant.id} value={tenant.id}>
+                  {tenant.name}
+                </option>
+              ))}
             </Select>
           </Field>
           <Field
@@ -1016,13 +1050,38 @@ function ResetPasswordDialog({
 /* -- Notification log ---------------------------------------------------- */
 
 function NotificationLog() {
+  const queryClient = useQueryClient()
   const notificationsQuery = useQuery({
     queryKey: ['notifications'],
     queryFn: () => adminApi.listNotifications(),
   })
 
+  const retryMutation = useMutation({
+    mutationFn: (id: string) => adminApi.retryNotification(id),
+    onSuccess: (notification) => {
+      queryClient.setQueryData<Notification[]>(['notifications'], (old) =>
+        (old ?? []).map((item) =>
+          item.id === notification.id ? notification : item,
+        ),
+      )
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+      toast.success(
+        `Retry queued for ${notification.recipient_contact ?? 'the recipient'}.`,
+      )
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Could not retry the notification.',
+      )
+    },
+  })
+
   const notifications = notificationsQuery.data ?? []
   const failedCount = notifications.filter((n) => n.status === 'failed').length
+  const pendingCount = notifications.filter((n) => n.status === 'pending').length
+  const sentCount = notifications.filter((n) => n.status === 'sent').length
 
   return (
     <div className="space-y-4">
@@ -1031,7 +1090,9 @@ function NotificationLog() {
           'rounded-lg border p-3 text-sm',
           failedCount > 0
             ? 'border-danger-500/30 bg-danger-50 text-danger-900'
-            : 'border-ink-200 bg-white text-ink-600 shadow-xs',
+            : pendingCount > 0
+              ? 'border-warning-500/30 bg-warning-50 text-warning-900'
+              : 'border-ink-200 bg-white text-ink-600 shadow-xs',
         )}
       >
         {failedCount > 0 ? (
@@ -1040,11 +1101,28 @@ function NotificationLog() {
               {failedCount} delivery{' '}
               {failedCount === 1 ? 'has' : 'have'} failed.
             </span>{' '}
-            Failed messages are listed with the provider error below. Retry the
-            delivery once the gateway is reachable.
+            {pendingCount > 0
+              ? `${pendingCount} more ${pendingCount === 1 ? 'is' : 'are'} still queued. `
+              : ''}
+            Failed messages are listed with the provider error below; use Retry
+            to put one back on the queue.
+          </p>
+        ) : pendingCount > 0 ? (
+          <p>
+            <span className="font-semibold">
+              {pendingCount} {pendingCount === 1 ? 'message is' : 'messages are'}{' '}
+              waiting to be delivered.
+            </span>{' '}
+            The email worker will pick them up automatically.
+          </p>
+        ) : sentCount > 0 ? (
+          <p>
+            All {sentCount} queued{' '}
+            {sentCount === 1 ? 'message has' : 'messages have'} been delivered
+            successfully.
           </p>
         ) : (
-          <p>Every queued message has been delivered successfully.</p>
+          <p>No delivery has been recorded yet.</p>
         )}
       </div>
 
@@ -1067,6 +1145,7 @@ function NotificationLog() {
                 <TableHead>Status</TableHead>
                 <TableHead>Sent</TableHead>
                 <TableHead>Error</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1115,6 +1194,26 @@ function NotificationLog() {
                     ) : (
                       <span className="text-ink-400">—</span>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end">
+                      {notification.status === 'failed' ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          loading={
+                            retryMutation.isPending &&
+                            retryMutation.variables === notification.id
+                          }
+                          onClick={() => retryMutation.mutate(notification.id)}
+                        >
+                          <RefreshCw />
+                          Retry
+                        </Button>
+                      ) : (
+                        <span className="text-ink-400">—</span>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
