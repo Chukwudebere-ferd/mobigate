@@ -188,10 +188,16 @@ export function StaffOnboardingPage() {
     mutationFn: ({
       ticket,
       values,
+      policyIds,
     }: {
       ticket: string
       values: StaffDetailsValues
-    }) => staffApi.completeOnboarding(ticket, buildOnboardingForm(values)),
+      policyIds: string[]
+    }) =>
+      staffApi.completeOnboarding(
+        ticket,
+        buildOnboardingForm(values, policyIds),
+      ),
     onSuccess: (result) => {
       setStaffId(result.staff.staff_id)
       setStaffName(`${result.staff.first_name} ${result.staff.last_name}`)
@@ -211,8 +217,12 @@ export function StaffOnboardingPage() {
       <DetailsPhase
         redemption={redemption}
         isSubmitting={submitDetails.isPending}
-        onSubmit={(values) =>
-          submitDetails.mutate({ ticket: redemption.ticket, values })
+        onSubmit={(values, policyIds) =>
+          submitDetails.mutate({
+            ticket: redemption.ticket,
+            values,
+            policyIds,
+          })
         }
       />
     )
@@ -324,10 +334,13 @@ function DetailsPhase({
 }: {
   redemption: StaffRedemption
   isSubmitting: boolean
-  onSubmit: (values: StaffDetailsValues) => void
+  onSubmit: (values: StaffDetailsValues, policyIds: string[]) => void
 }) {
   const application = redemption.application
   const prefill = redemption.prefill
+  const policies = redemption.policies ?? []
+  const [acceptedPolicies, setAcceptedPolicies] = useState<string[]>([])
+  const [policyError, setPolicyError] = useState<string | null>(null)
   // An earlier snapshot saved from this form; its values win over prefill.
   const draft = redemption.draft as Partial<StaffDetailsValues> | undefined
 
@@ -470,7 +483,20 @@ function DetailsPhase({
 
   return (
     <form
-      onSubmit={handleSubmit(onSubmit)}
+      onSubmit={handleSubmit((values) => {
+        const missing = policies.filter(
+          (policy) =>
+            policy.required && !acceptedPolicies.includes(policy.id),
+        )
+        if (missing.length > 0) {
+          setPolicyError(
+            `Accept ${missing.map((policy) => policy.title).join(', ')} to continue.`,
+          )
+          return
+        }
+        setPolicyError(null)
+        onSubmit(values, acceptedPolicies)
+      })}
       className="space-y-6"
       noValidate
     >
@@ -1078,6 +1104,40 @@ function DetailsPhase({
               {errors.rules_of_engagement.message}
             </p>
           )}
+
+          {policies.length > 0 && (
+            <div className="space-y-3 border-t border-ink-100 pt-4">
+              <div>
+                <p className="text-sm font-semibold text-ink-900">
+                  Group policies
+                </p>
+                <p className="mt-0.5 text-xs text-ink-500">
+                  These policies are maintained by the Mobigate Group
+                  administration team.
+                </p>
+              </div>
+              {policies.map((policy) => (
+                <Checkbox
+                  key={policy.id}
+                  id={`policy-${policy.id}`}
+                  label={policy.title}
+                  description={policy.body}
+                  checked={acceptedPolicies.includes(policy.id)}
+                  onChange={(event) => {
+                    setPolicyError(null)
+                    setAcceptedPolicies((current) =>
+                      event.target.checked
+                        ? [...current, policy.id]
+                        : current.filter((id) => id !== policy.id),
+                    )
+                  }}
+                />
+              ))}
+              {policyError && (
+                <p className="text-xs text-danger-600">{policyError}</p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -1206,7 +1266,10 @@ function dateInputValue(value: string | null | undefined): string {
  * `qualification_document`, rules acceptance is the string "true", and the
  * single `location_id` carries the deepest selected level (city, else LGA).
  */
-function buildOnboardingForm(values: StaffDetailsValues): FormData {
+function buildOnboardingForm(
+  values: StaffDetailsValues,
+  policyIds: string[] = [],
+): FormData {
   const form = new FormData()
   form.set('first_name', values.first_name)
   form.set('last_name', values.last_name)
@@ -1231,6 +1294,7 @@ function buildOnboardingForm(values: StaffDetailsValues): FormData {
   form.set('next_of_kin_relationship', values.next_of_kin_relationship)
   form.set('next_of_kin_phone', values.next_of_kin_phone)
   form.set('rules_accepted', 'true')
+  if (policyIds.length > 0) form.set('policy_ids', policyIds.join(','))
 
   const idFile = values.id_document?.[0]
   if (idFile) form.set('id_document', idFile)

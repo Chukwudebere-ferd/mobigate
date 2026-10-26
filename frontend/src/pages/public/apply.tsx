@@ -148,6 +148,14 @@ export function ApplyPage() {
   const stateId = useWatch({ control, name: 'state_id' })
   const photoValue = useWatch({ control, name: 'photo' })
 
+  const policiesQuery = useQuery({
+    queryKey: ['public', 'policies', 'applicant'],
+    queryFn: () => publicApi.listPolicies('applicant'),
+  })
+  const policies = policiesQuery.data ?? []
+  const [acceptedPolicies, setAcceptedPolicies] = React.useState<string[]>([])
+  const [policyError, setPolicyError] = React.useState<string | null>(null)
+
   const locationsQuery = useQuery({
     queryKey: ['public', 'locations'],
     queryFn: () => publicApi.listLocations(),
@@ -198,8 +206,19 @@ export function ApplyPage() {
 
   const onSubmit = handleSubmit((values) => {
     if (!job) return
+    const missing = policies.filter(
+      (policy) => policy.required && !acceptedPolicies.includes(policy.id),
+    )
+    if (missing.length > 0) {
+      setPolicyError(
+        `Accept ${missing.map((policy) => policy.title).join(', ')} to continue.`,
+      )
+      return
+    }
+    setPolicyError(null)
     mutation.mutate({
       job_id: job.id,
+      policy_ids: acceptedPolicies,
       first_name: values.first_name,
       last_name: values.last_name,
       phone: values.phone,
@@ -693,6 +712,39 @@ export function ApplyPage() {
                   </p>
                 ) : null}
               </div>
+
+              {policies.length > 0 && (
+                <div className="space-y-3 rounded-lg border border-ink-200 bg-ink-50/60 p-3.5">
+                  <div>
+                    <p className="text-sm font-semibold text-ink-900">
+                      Group policies
+                    </p>
+                    <p className="mt-0.5 text-xs text-ink-500">
+                      Please read and accept each policy before submitting.
+                    </p>
+                  </div>
+                  {policies.map((policy) => (
+                    <Checkbox
+                      key={policy.id}
+                      id={`policy-${policy.id}`}
+                      label={policy.title}
+                      description={policy.body}
+                      checked={acceptedPolicies.includes(policy.id)}
+                      onChange={(event) => {
+                        setPolicyError(null)
+                        setAcceptedPolicies((current) =>
+                          event.target.checked
+                            ? [...current, policy.id]
+                            : current.filter((id) => id !== policy.id),
+                        )
+                      }}
+                    />
+                  ))}
+                  {policyError && (
+                    <p className="text-xs text-danger-600">{policyError}</p>
+                  )}
+                </div>
+              )}
 
               <div className="flex justify-end">
                 <Button

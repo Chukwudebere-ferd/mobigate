@@ -30,6 +30,8 @@ import type {
   MessageTemplate,
   Notification,
   Paginated,
+  Policy,
+  PolicyAudience,
   Shortlist,
   StaffDraftResponse,
   StaffDraftSaveResponse,
@@ -127,6 +129,8 @@ export interface ApplicationSubmission {
   address_line: string
   qualification: string
   consent: boolean
+  /** Admin-managed policies the applicant ticked. */
+  policy_ids?: string[]
   photo?: File
 }
 
@@ -176,6 +180,16 @@ export const publicApi = {
     return response.items
   },
 
+  /** GET /public/policies — active policies for an applicant or staff form. */
+  async listPolicies(
+    audience: Exclude<PolicyAudience, 'both'>,
+  ): Promise<Policy[]> {
+    const response = await http.get<{ items: Policy[] }>('/public/policies', {
+      audience,
+    })
+    return response.items
+  },
+
   /**
    * POST /public/applications as multipart/form-data, rate-limited by the
    * server. Returns 409 when an open application already exists (BR-09).
@@ -192,6 +206,9 @@ export const publicApi = {
     form.set('address_line', payload.address_line)
     form.set('qualification', payload.qualification)
     form.set('consent', payload.consent ? 'true' : 'false')
+    if (payload.policy_ids?.length) {
+      form.set('policy_ids', payload.policy_ids.join(','))
+    }
     if (payload.photo) form.set('photo', payload.photo)
     return http.post<Application>('/public/applications', form)
   },
@@ -570,6 +587,38 @@ export const adminApi = {
 
   async testTemplate(id: string): Promise<Notification> {
     return http.post<Notification>(`/admin/templates/${id}/test`, {})
+  },
+
+  async listPolicies(): Promise<Policy[]> {
+    const response = await http.get<{ items: Policy[] }>('/admin/policies')
+    return response.items
+  },
+
+  async createPolicy(payload: {
+    title: string
+    body: string
+    audience: PolicyAudience
+    required: boolean
+    active: boolean
+  }): Promise<Policy> {
+    return http.post<Policy>('/admin/policies', payload)
+  },
+
+  async updatePolicy(
+    id: string,
+    payload: {
+      title: string
+      body: string
+      audience: PolicyAudience
+      required: boolean
+      active: boolean
+    },
+  ): Promise<Policy> {
+    return http.patch<Policy>(`/admin/policies/${id}`, payload)
+  },
+
+  async deletePolicy(id: string): Promise<void> {
+    await http.delete(`/admin/policies/${id}`)
   },
 
   async getAccessCodeSettings(): Promise<AdminSettings> {

@@ -22,8 +22,10 @@ import {
   MapPin,
   Phone,
   Search,
+  UserCheck,
   UserPlus,
   Users,
+  UserX,
 } from 'lucide-react'
 import * as React from 'react'
 import { toast } from 'sonner'
@@ -138,6 +140,26 @@ export function AdminStaffPage() {
     queryFn: () => adminApi.listDepartments(),
   })
 
+  // The register itself is paginated, so ask the API for each status total
+  // rather than counting only the rows currently visible.
+  const statsQuery = useQuery({
+    queryKey: ['staff', 'stats'],
+    queryFn: async () => {
+      const [all, active, suspended, exited] = await Promise.all([
+        adminApi.listStaff({ per_page: 1 }),
+        adminApi.listStaff({ per_page: 1, status: 'active' }),
+        adminApi.listStaff({ per_page: 1, status: 'suspended' }),
+        adminApi.listStaff({ per_page: 1, status: 'exited' }),
+      ])
+      return {
+        total: all.total,
+        active: active.total,
+        suspended: suspended.total,
+        exited: exited.total,
+      }
+    },
+  })
+
   const items = staffQuery.data?.items ?? []
   const total = staffQuery.data?.total ?? 0
   const totalPages = staffQuery.data?.total_pages ?? 1
@@ -198,6 +220,42 @@ export function AdminStaffPage() {
           </>
         }
       />
+
+      {/* -- Overview -- */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <StaffStatCard
+          label="Total staff"
+          value={statsQuery.data?.total}
+          loading={statsQuery.isLoading}
+          icon={Users}
+          tone="brand"
+          hint="All personnel records"
+        />
+        <StaffStatCard
+          label="Active"
+          value={statsQuery.data?.active}
+          loading={statsQuery.isLoading}
+          icon={UserCheck}
+          tone="success"
+          hint="Currently in service"
+        />
+        <StaffStatCard
+          label="Suspended"
+          value={statsQuery.data?.suspended}
+          loading={statsQuery.isLoading}
+          icon={UserX}
+          tone="warning"
+          hint="Access paused by HR"
+        />
+        <StaffStatCard
+          label="Departments"
+          value={departmentsQuery.data?.length}
+          loading={departmentsQuery.isLoading}
+          icon={Briefcase}
+          tone="info"
+          hint="Teams with staff records"
+        />
+      </div>
 
       {/* -- Filter bar -- */}
       <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-xs">
@@ -389,6 +447,59 @@ export function AdminStaffPage() {
           }}
         />
       )}
+    </div>
+  )
+}
+
+/* -- Overview ------------------------------------------------------------ */
+
+const statToneStyles = {
+  brand: 'bg-brand-50 text-brand-700 ring-brand-100',
+  success: 'bg-success-50 text-success-700 ring-success-100',
+  warning: 'bg-warning-50 text-warning-700 ring-warning-100',
+  info: 'bg-info-50 text-info-700 ring-info-100',
+} as const
+
+function StaffStatCard({
+  label,
+  value,
+  loading,
+  icon: Icon,
+  tone,
+  hint,
+}: {
+  label: string
+  value: number | undefined
+  loading: boolean
+  icon: typeof Users
+  tone: keyof typeof statToneStyles
+  hint: string
+}) {
+  return (
+    <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-xs">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-2xs font-semibold tracking-wider text-ink-500 uppercase">
+            {label}
+          </p>
+          {loading ? (
+            <div className="mt-2 h-8 w-16 animate-pulse rounded bg-ink-100" />
+          ) : (
+            <p className="mt-1 text-2xl font-semibold tracking-tight text-ink-950 tabular">
+              {value ?? '—'}
+            </p>
+          )}
+        </div>
+        <span
+          className={cn(
+            'flex size-9 shrink-0 items-center justify-center rounded-lg ring-1',
+            statToneStyles[tone],
+          )}
+        >
+          <Icon className="size-4.5" aria-hidden />
+        </span>
+      </div>
+      <p className="mt-2 text-xs text-ink-500">{hint}</p>
     </div>
   )
 }

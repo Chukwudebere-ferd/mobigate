@@ -15,7 +15,7 @@ import { Link } from 'react-router-dom'
 
 import { Avatar } from '@/components/ui/avatar'
 import { buttonVariants } from '@/components/ui/button'
-import { EmptyState } from '@/components/ui/empty-state'
+import { EmptyState, Spinner } from '@/components/ui/empty-state'
 import { Input, Select } from '@/components/ui/input'
 import { cn } from '@/lib/cn'
 import { employmentCategoryLabel, locationPath, publicApi } from '@/lib/api'
@@ -328,7 +328,21 @@ export function CareersPage() {
       {/* -- Roles ------------------------------------------------------------ */}
       <section>
         <div className="mx-auto max-w-5xl px-4 py-4 sm:px-6 sm:py-8">
-          {isLoading ? null : filtered.length === 0 ? (
+          {isLoading ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="rounded-xl border border-ink-200 bg-white px-6 py-12"
+            >
+              <Spinner className="py-0" />
+              <p className="mt-4 text-center text-sm font-medium text-ink-700">
+                Loading open roles…
+              </p>
+              <p className="mt-1 text-center text-xs text-ink-500">
+                Fetching the latest opportunities from Mobigate Group.
+              </p>
+            </div>
+          ) : filtered.length === 0 ? (
             <div className="rounded-xl border border-ink-200">
               <EmptyState
                 icon={SearchX}

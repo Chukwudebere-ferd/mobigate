@@ -259,6 +259,21 @@ export interface Department {
   name: string
 }
 
+export type PolicyAudience = 'applicant' | 'staff' | 'both'
+
+export interface Policy {
+  id: string
+  title: string
+  body: string
+  audience: PolicyAudience
+  required: boolean
+  active: boolean
+  version: number
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface Document {
   id: string
   tenant_id: string | null
@@ -444,6 +459,8 @@ export interface StaffRedemption {
   departments: Department[]
   application?: Application
   prefill?: StaffRedeemPrefill
+  /** Active admin-managed staff policies shown as checkboxes. */
+  policies?: Policy[]
   /** Earlier form snapshot saved as a draft, if any. */
   draft?: Record<string, unknown>
 }

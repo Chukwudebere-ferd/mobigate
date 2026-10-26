@@ -85,10 +85,17 @@ func (h *Handler) redeemAccessCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	policies, err := h.Store.ApplicablePolicies(r.Context(), models.PolicyStaff)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load the staff policies")
+		return
+	}
+
 	payload := map[string]any{
 		"ticket":            ticket,
 		"ticket_expires_at": time.Now().Add(ticketTTL).UTC().Format(time.RFC3339),
 		"departments":       redemption.Departments,
+		"policies":          policies,
 	}
 	if redemption.Application != nil {
 		payload["application"] = redemption.Application
@@ -253,6 +260,9 @@ func (h *Handler) completeOnboarding(w http.ResponseWriter, r *http.Request) {
 
 	if err := decodeOnboardingForm(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !h.requirePolicies(w, r, userID, models.PolicyStaff, r.FormValue("policy_ids")) {
 		return
 	}
 
@@ -582,9 +592,24 @@ func (h *Handler) verifyTicket(token string) (uuid.UUID, uuid.UUID, error) {
 	if !hmac.Equal([]byte(expected), []byte(parts[1])) {
 		return uuid.Nil, uuid.Nil, errors.New("invalid ticket")
 	}
-	var userID, codeID uuid.UUID
-	var expiry int64
-	if _, err := fmt.Sscanf(string(bodyBytes), "%s|%s|%d", &userID, &codeID, &expiry); err != nil {
+	// The body is `userID|codeID|expiry`. Do not use fmt.Sscanf here:
+	// `%s` consumes the whole body (it stops only at whitespace), so every
+	// ticket failed verification. Split on the delimiter and parse each
+	// part explicitly.
+	fields := strings.Split(string(bodyBytes), "|")
+	if len(fields) != 3 {
+		return uuid.Nil, uuid.Nil, errors.New("malformed ticket")
+	}
+	userID, err := uuid.Parse(fields[0])
+	if err != nil {
+		return uuid.Nil, uuid.Nil, errors.New("malformed ticket")
+	}
+	codeID, err := uuid.Parse(fields[1])
+	if err != nil {
+		return uuid.Nil, uuid.Nil, errors.New("malformed ticket")
+	}
+	expiry, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
 		return uuid.Nil, uuid.Nil, errors.New("malformed ticket")
 	}
 	if time.Now().Unix() > expiry {

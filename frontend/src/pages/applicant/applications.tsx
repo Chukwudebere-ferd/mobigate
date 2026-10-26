@@ -68,7 +68,7 @@ export function ApplicantApplicationsPage() {
             title="You have not applied for any roles yet"
             description="Browse the open roles at Mobigate Group and submit an application — you will be able to track its progress from this page."
             action={
-              <Link to="/" className={buttonVariants({})}>
+              <Link to="/careers" className={buttonVariants({})}>
                 Browse open roles
                 <ArrowRight />
               </Link>

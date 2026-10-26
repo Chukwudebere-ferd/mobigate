@@ -33,9 +33,21 @@ const (
 )
 
 // publicSession resolves the signed-in user for /me and /staff routes.
+//
+// Most callers sit behind require/MiddlewareAllowPending, which has already
+// attached a session. Public POST routes such as application submission use
+// the same handler but cannot require a whole auth group; resolve the cookie
+// directly in that case.
 func (h *Handler) publicSession(w http.ResponseWriter, r *http.Request) (auth.Context, bool) {
-	session, ok := auth.FromContext(r.Context())
-	if !ok {
+	if session, ok := auth.FromContext(r.Context()); ok {
+		return session, true
+	}
+	if h.Verifier == nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return auth.Context{}, false
+	}
+	session, err := h.Verifier.Verify(r)
+	if err != nil {
 		writeError(w, http.StatusUnauthorized, "authentication required")
 		return auth.Context{}, false
 	}
@@ -179,6 +191,10 @@ func (h *Handler) submitApplication(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if session.User.Status != models.UserStatusActive {
+		writeError(w, http.StatusForbidden, "your account is not active")
+		return
+	}
 	applicantID, ok := sessionUserID(w, session)
 	if !ok {
 		return
@@ -202,6 +218,9 @@ func (h *Handler) submitApplication(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeApplicationForm(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !h.requirePolicies(w, r, applicantID, models.PolicyApplicant, r.FormValue("policy_ids")) {
 		return
 	}
 

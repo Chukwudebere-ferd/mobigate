@@ -9,13 +9,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Bell,
+  FileText,
   KeyRound,
   Mail,
   MessageSquare,
   Pencil,
+  Plus,
   RefreshCw,
   Send,
   ShieldCheck,
+  Trash2,
   UserCheck,
   UserPlus,
   Users,
@@ -36,7 +39,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { EmptyState, TableSkeleton } from '@/components/ui/empty-state'
-import { Field, Input, Select, Textarea } from '@/components/ui/input'
+import { Checkbox, Field, Input, Select, Textarea } from '@/components/ui/input'
 import { PageHeader } from '@/components/ui/page-header'
 import {
   Table,
@@ -56,6 +59,8 @@ import type {
   MessageTemplate,
   Notification,
   NotificationChannel,
+  Policy,
+  PolicyAudience,
   User,
   UserRole,
 } from '@/types/domain'
@@ -121,6 +126,7 @@ export function AdminSettingsPage() {
           <TabsTrigger value="confirmation">Confirmation messages</TabsTrigger>
           <TabsTrigger value="email">Email templates</TabsTrigger>
           <TabsTrigger value="codes">Access code settings</TabsTrigger>
+          <TabsTrigger value="policies">Policies</TabsTrigger>
           {isSuperAdmin && (
             <TabsTrigger value="users">Users &amp; admins</TabsTrigger>
           )}
@@ -135,6 +141,9 @@ export function AdminSettingsPage() {
         </TabsContent>
         <TabsContent value="codes" className="pt-5">
           <AccessCodeSettings />
+        </TabsContent>
+        <TabsContent value="policies" className="pt-5">
+          <PoliciesPanel />
         </TabsContent>
         {isSuperAdmin && (
           <TabsContent value="users" className="pt-5">
@@ -470,6 +479,307 @@ function EditTemplateDialog({
           }}
         >
           Save template
+        </Button>
+      </DialogFooter>
+    </Dialog>
+  )
+}
+
+/* -- Policies ------------------------------------------------------------ */
+
+const policyAudienceLabels: Record<PolicyAudience, string> = {
+  applicant: 'Applicants',
+  staff: 'Staff',
+  both: 'Applicants & staff',
+}
+
+function PoliciesPanel() {
+  const queryClient = useQueryClient()
+  const policiesQuery = useQuery({
+    queryKey: ['policies'],
+    queryFn: () => adminApi.listPolicies(),
+  })
+  const [editing, setEditing] = React.useState<Policy | 'new' | null>(null)
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => adminApi.deletePolicy(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['policies'] })
+      toast.success('Policy deleted.')
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not delete the policy.',
+      )
+    },
+  })
+
+  const policies = policiesQuery.data ?? []
+  const activeCount = policies.filter((policy) => policy.active).length
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-3 rounded-xl border border-ink-200 bg-white p-4 shadow-xs sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-700 ring-1 ring-brand-100">
+            <FileText className="size-4.5" aria-hidden />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-ink-900">
+              Policy acknowledgements
+            </p>
+            <p className="mt-0.5 text-sm text-ink-600">
+              Active policies appear as checkboxes on the applicant and staff
+              forms. {activeCount} active of {policies.length}.
+            </p>
+          </div>
+        </div>
+        <Button onClick={() => setEditing('new')}>
+          <Plus />
+          Add policy
+        </Button>
+      </div>
+
+      {policiesQuery.isLoading ? (
+        <div className="rounded-xl border border-ink-200 bg-white shadow-xs">
+          <TableSkeleton rows={4} />
+        </div>
+      ) : policies.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title="No policies yet"
+          description="Add a policy to show it as a required checkbox on the applicant or staff forms."
+          action={
+            <Button variant="outline" onClick={() => setEditing('new')}>
+              <Plus />
+              Add the first policy
+            </Button>
+          }
+        />
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-ink-200 bg-white shadow-xs">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Policy</TableHead>
+                <TableHead>Audience</TableHead>
+                <TableHead>Required</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Version</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {policies.map((policy) => (
+                <TableRow key={policy.id}>
+                  <TableCell>
+                    <p className="text-sm font-medium text-ink-900">
+                      {policy.title}
+                    </p>
+                    <p className="mt-0.5 line-clamp-2 max-w-xl text-xs text-ink-500">
+                      {policy.body}
+                    </p>
+                  </TableCell>
+                  <TableCell>
+                    {policyAudienceLabels[policy.audience]}
+                  </TableCell>
+                  <TableCell>
+                    {policy.required ? (
+                      <Badge variant="warning">Required</Badge>
+                    ) : (
+                      <Badge variant="neutral">Optional</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {policy.active ? (
+                      <Badge variant="success">Active</Badge>
+                    ) : (
+                      <Badge variant="neutral">Inactive</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="tabular">v{policy.version}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setEditing(policy)}
+                        aria-label={`Edit ${policy.title}`}
+                      >
+                        <Pencil />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-danger-700 hover:bg-danger-50"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Delete “${policy.title}”? Existing acceptance records will also be removed.`,
+                            )
+                          ) {
+                            deleteMutation.mutate(policy.id)
+                          }
+                        }}
+                        aria-label={`Delete ${policy.title}`}
+                      >
+                        <Trash2 />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {editing && (
+        <PolicyDialog
+          policy={editing === 'new' ? null : editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null)
+            void queryClient.invalidateQueries({ queryKey: ['policies'] })
+            void queryClient.invalidateQueries({
+              queryKey: ['public', 'policies'],
+            })
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function PolicyDialog({
+  policy,
+  onClose,
+  onSaved,
+}: {
+  policy: Policy | null
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [title, setTitle] = React.useState(policy?.title ?? '')
+  const [body, setBody] = React.useState(policy?.body ?? '')
+  const [audience, setAudience] = React.useState<PolicyAudience>(
+    policy?.audience ?? 'both',
+  )
+  const [required, setRequired] = React.useState(policy?.required ?? true)
+  const [active, setActive] = React.useState(policy?.active ?? true)
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      policy
+        ? adminApi.updatePolicy(policy.id, {
+            title: title.trim(),
+            body: body.trim(),
+            audience,
+            required,
+            active,
+          })
+        : adminApi.createPolicy({
+            title: title.trim(),
+            body: body.trim(),
+            audience,
+            required,
+            active,
+          }),
+    onSuccess: () => {
+      toast.success(policy ? 'Policy updated.' : 'Policy added.')
+      onSaved()
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not save the policy.',
+      )
+    },
+  })
+
+  const valid = title.trim().length > 0 && body.trim().length > 0
+
+  return (
+    <Dialog open onOpenChange={onClose} className="sm:max-w-2xl">
+      <DialogHeader>
+        <div className="min-w-0">
+          <DialogTitle>{policy ? 'Edit policy' : 'Add policy'}</DialogTitle>
+          <DialogDescription>
+            {policy
+              ? 'Saving increments the version and asks users to acknowledge the updated wording.'
+              : 'The policy appears immediately as a checkbox on the selected forms.'}
+          </DialogDescription>
+        </div>
+        <DialogClose onClick={onClose} />
+      </DialogHeader>
+      <DialogBody className="space-y-4">
+        <Field label="Title" htmlFor="policy-title" required>
+          <Input
+            id="policy-title"
+            value={title}
+            maxLength={160}
+            placeholder="e.g. Code of conduct"
+            onChange={(event) => setTitle(event.target.value)}
+          />
+        </Field>
+        <Field
+          label="Policy text"
+          htmlFor="policy-body"
+          required
+          hint="Keep it concise; this wording is shown beside the checkbox."
+        >
+          <Textarea
+            id="policy-body"
+            value={body}
+            rows={6}
+            placeholder="Explain what the user is acknowledging…"
+            onChange={(event) => setBody(event.target.value)}
+          />
+        </Field>
+        <Field label="Audience" htmlFor="policy-audience" required>
+          <Select
+            id="policy-audience"
+            value={audience}
+            onChange={(event) =>
+              setAudience(event.target.value as PolicyAudience)
+            }
+          >
+            {(Object.keys(policyAudienceLabels) as PolicyAudience[]).map(
+              (value) => (
+                <option key={value} value={value}>
+                  {policyAudienceLabels[value]}
+                </option>
+              ),
+            )}
+          </Select>
+        </Field>
+        <div className="space-y-3 rounded-lg border border-ink-200 bg-ink-50/60 p-3">
+          <Checkbox
+            id="policy-required"
+            label="Required"
+            description="Users must tick this policy before submitting the form."
+            checked={required}
+            onChange={(event) => setRequired(event.target.checked)}
+          />
+          <Checkbox
+            id="policy-active"
+            label="Active"
+            description="Inactive policies stay on record but are hidden from users."
+            checked={active}
+            onChange={(event) => setActive(event.target.checked)}
+          />
+        </div>
+      </DialogBody>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          loading={saveMutation.isPending}
+          disabled={!valid}
+          onClick={() => saveMutation.mutate()}
+        >
+          {policy ? 'Save policy' : 'Add policy'}
         </Button>
       </DialogFooter>
     </Dialog>

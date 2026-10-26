@@ -319,6 +319,29 @@ type Department struct {
 	Name     string    `json:"name"`
 }
 
+// PolicyAudience selects which self-service forms show a policy.
+type PolicyAudience string
+
+const (
+	PolicyApplicant PolicyAudience = "applicant"
+	PolicyStaff     PolicyAudience = "staff"
+	PolicyBoth      PolicyAudience = "both"
+)
+
+// Policy is an admin-authored acknowledgement shown as a checkbox.
+type Policy struct {
+	ID        uuid.UUID      `json:"id"`
+	Title     string         `json:"title"`
+	Body      string         `json:"body"`
+	Audience  PolicyAudience `json:"audience"`
+	Required  bool           `json:"required"`
+	Active    bool           `json:"active"`
+	Version   int            `json:"version"`
+	CreatedBy *uuid.UUID     `json:"created_by"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
 type Document struct {
 	ID         uuid.UUID  `json:"id"`
 	TenantID   *uuid.UUID `json:"tenant_id"`
