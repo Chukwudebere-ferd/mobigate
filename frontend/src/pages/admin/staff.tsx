@@ -20,9 +20,12 @@ import {
   Lock,
   Mail,
   MapPin,
+  MoreHorizontal,
   Phone,
   Search,
+  SlidersHorizontal,
   UserCheck,
+  UserMinus,
   UserPlus,
   Users,
   UserX,
@@ -108,6 +111,7 @@ export function AdminStaffPage() {
   const [page, setPage] = React.useState(1)
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const [manualOpen, setManualOpen] = React.useState(false)
+  const [filtersOpen, setFiltersOpen] = React.useState(false)
 
   // Debounce the free-text search so we do not refetch on every keystroke.
   React.useEffect(() => {
@@ -163,8 +167,20 @@ export function AdminStaffPage() {
   const items = staffQuery.data?.items ?? []
   const total = staffQuery.data?.total ?? 0
   const totalPages = staffQuery.data?.total_pages ?? 1
+  const stats = statsQuery.data
+  const statsTotal = stats?.total ?? 0
+  const activeFilterCount =
+    Number(status !== 'all') +
+    Number(category !== 'all') +
+    Number(departmentId !== '')
   const hasFilters =
     search.length > 0 || status !== 'all' || category !== 'all' || departmentId !== ''
+
+  function shareOfTotal(value: number | undefined) {
+    if (statsQuery.isLoading) return 'Loading…'
+    if (!statsTotal || value === undefined) return 'No records yet'
+    return `${Math.round((value / statsTotal) * 100)}% of the register`
+  }
 
   function handleExport() {
     if (items.length === 0) {
@@ -204,138 +220,199 @@ export function AdminStaffPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Staff"
-        description="Every person appointed to the Group, with the Staff ID issued at onboarding. Appointed candidates become staff records automatically once their access code is redeemed."
+        title="Staff dashboard"
+        description="A live overview of everyone appointed to the Group. Open a record for employment and personal details, or add a staff member manually."
         icon={Users}
         actions={
-          <>
-            <Button variant="outline" onClick={handleExport}>
-              <Download />
-              Export register
-            </Button>
-            <Button onClick={() => setManualOpen(true)}>
-              <UserPlus />
-              Add staff manually
-            </Button>
-          </>
+          <Button variant="outline" onClick={handleExport}>
+            <Download />
+            Export register
+          </Button>
         }
       />
 
       {/* -- Overview -- */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <StaffStatCard
-          label="Total staff"
-          value={statsQuery.data?.total}
+          label="Total employees"
+          value={stats?.total}
           loading={statsQuery.isLoading}
           icon={Users}
           tone="brand"
           hint="All personnel records"
         />
         <StaffStatCard
-          label="Active"
-          value={statsQuery.data?.active}
+          label="Active employees"
+          value={stats?.active}
           loading={statsQuery.isLoading}
           icon={UserCheck}
           tone="success"
-          hint="Currently in service"
+          hint={shareOfTotal(stats?.active)}
         />
         <StaffStatCard
           label="Suspended"
-          value={statsQuery.data?.suspended}
+          value={stats?.suspended}
           loading={statsQuery.isLoading}
           icon={UserX}
           tone="warning"
-          hint="Access paused by HR"
+          hint={shareOfTotal(stats?.suspended)}
         />
         <StaffStatCard
-          label="Departments"
-          value={departmentsQuery.data?.length}
-          loading={departmentsQuery.isLoading}
-          icon={Briefcase}
-          tone="info"
-          hint="Teams with staff records"
+          label="Exited"
+          value={stats?.exited}
+          loading={statsQuery.isLoading}
+          icon={UserMinus}
+          tone="danger"
+          hint={shareOfTotal(stats?.exited)}
         />
-      </div>
-
-      {/* -- Filter bar -- */}
-      <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-xs">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Search" htmlFor="staff-search">
-            <div className="relative">
-              <Search
-                className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-ink-400"
-                aria-hidden
-              />
-              <Input
-                id="staff-search"
-                className="pl-8"
-                placeholder="Name, Staff ID or email"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-              />
-            </div>
-          </Field>
-
-          <Field label="Status" htmlFor="staff-status">
-            <Select
-              id="staff-status"
-              value={status}
-              onChange={(e) => {
-                setStatus(e.target.value as StaffStatus | 'all')
-                setPage(1)
-              }}
-            >
-              <option value="all">All statuses</option>
-              {(Object.keys(staffStatusLabels) as StaffStatus[]).map((value) => (
-                <option key={value} value={value}>
-                  {staffStatusLabels[value]}
-                </option>
-              ))}
-            </Select>
-          </Field>
-
-          <Field label="Employment category" htmlFor="staff-category">
-            <Select
-              id="staff-category"
-              value={category}
-              onChange={(e) => {
-                setCategory(e.target.value as EmploymentCategory | 'all')
-                setPage(1)
-              }}
-            >
-              <option value="all">All categories</option>
-              {(Object.keys(employmentCategoryLabels) as EmploymentCategory[]).map(
-                (value) => (
-                  <option key={value} value={value}>
-                    {employmentCategoryLabels[value]}
-                  </option>
-                ),
-              )}
-            </Select>
-          </Field>
-
-          <Field label="Department" htmlFor="staff-department">
-            <Select
-              id="staff-department"
-              value={departmentId}
-              onChange={(e) => {
-                setDepartmentId(e.target.value)
-                setPage(1)
-              }}
-            >
-              <option value="">All departments</option>
-              {(departmentsQuery.data ?? []).map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
       </div>
 
       {/* -- Register -- */}
       <div className="overflow-hidden rounded-xl border border-ink-200 bg-white shadow-xs">
+        <div className="flex flex-col gap-4 border-b border-ink-200 px-4 py-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold tracking-tight text-ink-900">
+                Employee list
+              </h2>
+              <span className="rounded-full bg-ink-100 px-2 py-0.5 text-2xs font-semibold text-ink-600 tabular">
+                {total}
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs text-ink-500">
+              Search, filter and open a staff record.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="relative w-full sm:w-auto">
+              <Search
+                className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400"
+                aria-hidden
+              />
+              <Input
+                id="staff-search"
+                className="pl-9 sm:w-64"
+                placeholder="Search employees…"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+              />
+            </div>
+            <Button
+              variant="secondary"
+              onClick={() => setFiltersOpen((open) => !open)}
+              aria-expanded={filtersOpen}
+              aria-controls="staff-filters"
+              className="w-full sm:w-auto"
+            >
+              <SlidersHorizontal />
+              Filters
+              {activeFilterCount > 0 && (
+                <span className="flex size-5 items-center justify-center rounded-full bg-brand-600 text-2xs font-semibold text-white">
+                  {activeFilterCount}
+                </span>
+              )}
+            </Button>
+            <Button
+              onClick={() => setManualOpen(true)}
+              className="w-full sm:w-auto"
+            >
+              <UserPlus />
+              Add staff
+            </Button>
+          </div>
+        </div>
+
+        {filtersOpen && (
+          <div
+            id="staff-filters"
+            className="border-b border-ink-200 bg-ink-50/60 px-4 py-4"
+          >
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <Field label="Status" htmlFor="staff-status">
+                <Select
+                  id="staff-status"
+                  value={status}
+                  onChange={(e) => {
+                    setStatus(e.target.value as StaffStatus | 'all')
+                    setPage(1)
+                  }}
+                >
+                  <option value="all">All statuses</option>
+                  {(Object.keys(staffStatusLabels) as StaffStatus[]).map(
+                    (value) => (
+                      <option key={value} value={value}>
+                        {staffStatusLabels[value]}
+                      </option>
+                    ),
+                  )}
+                </Select>
+              </Field>
+
+              <Field label="Employment category" htmlFor="staff-category">
+                <Select
+                  id="staff-category"
+                  value={category}
+                  onChange={(e) => {
+                    setCategory(e.target.value as EmploymentCategory | 'all')
+                    setPage(1)
+                  }}
+                >
+                  <option value="all">All categories</option>
+                  {(
+                    Object.keys(
+                      employmentCategoryLabels,
+                    ) as EmploymentCategory[]
+                  ).map((value) => (
+                    <option key={value} value={value}>
+                      {employmentCategoryLabels[value]}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+
+              <Field label="Department" htmlFor="staff-department">
+                <Select
+                  id="staff-department"
+                  value={departmentId}
+                  onChange={(e) => {
+                    setDepartmentId(e.target.value)
+                    setPage(1)
+                  }}
+                >
+                  <option value="">All departments</option>
+                  {(departmentsQuery.data ?? []).map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className="text-xs text-ink-500">
+                Filters apply together. Search matches name, Staff ID or email.
+              </p>
+              {hasFilters && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSearchInput('')
+                    setSearch('')
+                    setStatus('all')
+                    setCategory('all')
+                    setDepartmentId('')
+                    setPage(1)
+                  }}
+                >
+                  Clear filters
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
+
         {staffQuery.isLoading ? (
           <TableSkeleton rows={6} />
         ) : items.length === 0 ? (
@@ -357,15 +434,14 @@ export function AdminStaffPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Staff</TableHead>
+                  <TableHead>Employee</TableHead>
                   <TableHead>Staff ID</TableHead>
-                  <TableHead>Category</TableHead>
+                  <TableHead>Role</TableHead>
                   <TableHead>Department</TableHead>
-                  <TableHead>Position</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Appointment date</TableHead>
+                  <TableHead>Contact</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>Joined</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -389,33 +465,47 @@ export function AdminStaffPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="font-mono text-xs text-ink-700">
+                      <span className="inline-flex rounded-md bg-ink-100 px-2 py-1 font-mono text-xs text-ink-700">
                         {staff.staff_id}
                       </span>
                     </TableCell>
                     <TableCell>
-                      <EmploymentCategoryBadge
-                        category={staff.employment_category}
-                      />
+                      <div className="flex flex-col gap-1">
+                        <span className="max-w-44 truncate text-sm text-ink-800">
+                          {staff.position ?? 'Unassigned'}
+                        </span>
+                        <EmploymentCategoryBadge
+                          category={staff.employment_category}
+                        />
+                      </div>
                     </TableCell>
-                    <TableCell>{staff.department_name ?? '—'}</TableCell>
-                    <TableCell>{staff.position ?? '—'}</TableCell>
-                    <TableCell>{staff.location_name ?? '—'}</TableCell>
                     <TableCell>
-                      <span className="tabular">
-                        {formatDate(staff.appointment_date)}
+                      <span className="whitespace-nowrap">
+                        {staff.department_name ?? '—'}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="whitespace-nowrap text-ink-600">
+                        {staff.phone ?? staff.email}
                       </span>
                     </TableCell>
                     <TableCell>
                       <StaffStatusBadge status={staff.status} />
                     </TableCell>
+                    <TableCell>
+                      <span className="whitespace-nowrap tabular text-ink-600">
+                        {formatDate(staff.appointment_date)}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-right">
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => setSelectedId(staff.id)}
+                        aria-label={`Open ${fullName(staff.first_name, staff.last_name)}'s record`}
+                        title="Open staff record"
                       >
-                        View
+                        <MoreHorizontal />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -426,6 +516,7 @@ export function AdminStaffPage() {
               page={staffQuery.data?.page ?? 1}
               totalPages={totalPages}
               total={total}
+              pageSize={PAGE_SIZE}
               onPageChange={setPage}
             />
           </>
@@ -457,6 +548,7 @@ const statToneStyles = {
   brand: 'bg-brand-50 text-brand-700 ring-brand-100',
   success: 'bg-success-50 text-success-700 ring-success-100',
   warning: 'bg-warning-50 text-warning-700 ring-warning-100',
+  danger: 'bg-danger-50 text-danger-700 ring-danger-100',
   info: 'bg-info-50 text-info-700 ring-info-100',
 } as const
 
@@ -476,20 +568,9 @@ function StaffStatCard({
   hint: string
 }) {
   return (
-    <div className="rounded-xl border border-ink-200 bg-white p-4 shadow-xs">
+    <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-xs transition-shadow hover:shadow-sm">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-2xs font-semibold tracking-wider text-ink-500 uppercase">
-            {label}
-          </p>
-          {loading ? (
-            <div className="mt-2 h-8 w-16 animate-pulse rounded bg-ink-100" />
-          ) : (
-            <p className="mt-1 text-2xl font-semibold tracking-tight text-ink-950 tabular">
-              {value ?? '—'}
-            </p>
-          )}
-        </div>
+        <p className="text-sm font-medium text-ink-600">{label}</p>
         <span
           className={cn(
             'flex size-9 shrink-0 items-center justify-center rounded-lg ring-1',
@@ -499,6 +580,13 @@ function StaffStatCard({
           <Icon className="size-4.5" aria-hidden />
         </span>
       </div>
+      {loading ? (
+        <div className="mt-5 h-9 w-20 animate-pulse rounded bg-ink-100" />
+      ) : (
+        <p className="mt-4 text-3xl font-semibold tracking-tight text-ink-950 tabular">
+          {value ?? '—'}
+        </p>
+      )}
       <p className="mt-2 text-xs text-ink-500">{hint}</p>
     </div>
   )

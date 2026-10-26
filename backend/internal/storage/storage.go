@@ -1,9 +1,11 @@
 // Package storage persists uploaded files (application photos, staff
 // documents) in Byteship, an S3-compatible object store.
 //
-// Every file is stored private. Nothing is served directly from the bucket;
-// the API authorises the caller and then issues a short-lived signed URL
-// (README §11.3 "served through an authorization gate").
+// The default is a private bucket: nothing is served directly, and the API
+// authorises the caller before issuing a short-lived signed URL (README
+// §11.3 "served through an authorization gate"). Byteship plans that do not
+// include private uploads can explicitly set BYTESHIP_VISIBILITY=public for
+// local testing; in that mode delivery uses the file's public URL instead.
 package storage
 
 import (
@@ -28,17 +30,28 @@ const SignedURLTTL = 10 * time.Minute
 
 // Store wraps the Byteship client.
 type Store struct {
-	client *byteship.Client
+	client     *byteship.Client
+	visibility byteship.Visibility
 }
 
 // New creates a Store. An empty apiKey leaves the store unconfigured, which
 // only makes upload routes fail closed at call time.
-func New(apiKey, baseURL string) *Store {
+func New(apiKey, baseURL, visibility string) *Store {
 	options := []byteship.Option{byteship.WithAPIKey(apiKey)}
 	if strings.TrimSpace(baseURL) != "" {
 		options = append(options, byteship.WithBaseURL(baseURL))
 	}
-	return &Store{client: byteship.NewClient(options...)}
+	mode := byteship.VisibilityPrivate
+	if strings.EqualFold(strings.TrimSpace(visibility), string(byteship.VisibilityPublic)) {
+		mode = byteship.VisibilityPublic
+	}
+	return &Store{client: byteship.NewClient(options...), visibility: mode}
+}
+
+// Public reports whether uploads are delivered through public URLs. Callers
+// use this to warn loudly; private delivery is the intended default.
+func (s *Store) Public() bool {
+	return s != nil && s.visibility == byteship.VisibilityPublic
 }
 
 // Configured reports whether uploads can succeed.
@@ -61,7 +74,7 @@ func (s *Store) Upload(ctx context.Context, path, filename, contentType string, 
 		ContentType: contentType,
 		Path:        path,
 		ByteSize:    size,
-		Visibility:  byteship.VisibilityPrivate,
+		Visibility:  s.visibility,
 	})
 	if err != nil {
 		if berr, ok := byteship.AsError(err); ok {
@@ -73,10 +86,22 @@ func (s *Store) Upload(ctx context.Context, path, filename, contentType string, 
 	return uploaded.Path, nil
 }
 
-// SignedURL mints a temporary delivery URL for a private file.
+// SignedURL mints a temporary delivery URL for a private file. In public
+// mode it resolves the file's public URL instead; the API still authorises
+// the caller before handing that URL to the browser.
 func (s *Store) SignedURL(ctx context.Context, key string) (string, error) {
 	if !s.Configured() {
 		return "", ErrNotConfigured
+	}
+	if s.visibility == byteship.VisibilityPublic {
+		file, err := s.client.GetFile(ctx, key)
+		if err != nil {
+			return "", fmt.Errorf("public url: %w", err)
+		}
+		if file.File.URL == nil || strings.TrimSpace(*file.File.URL) == "" {
+			return "", fmt.Errorf("public url: Byteship returned no URL")
+		}
+		return *file.File.URL, nil
 	}
 	signed, err := s.client.CreateSignedURL(ctx, key, byteship.CreateSignedURLInput{
 		ExpiresInSeconds: int(SignedURLTTL.Seconds()),

@@ -6,12 +6,14 @@ export function Pagination({
   page,
   totalPages,
   total,
+  pageSize,
   onPageChange,
   className,
 }: {
   page: number
   totalPages: number
   total?: number
+  pageSize?: number
   onPageChange: (page: number) => void
   className?: string
 }) {
@@ -30,6 +32,14 @@ export function Pagination({
     }
   }
 
+  const range =
+    total !== undefined && pageSize !== undefined
+      ? {
+          start: Math.min((page - 1) * pageSize + 1, total),
+          end: Math.min(page * pageSize, total),
+        }
+      : null
+
   return (
     <div
       className={cn(
@@ -39,8 +49,21 @@ export function Pagination({
     >
       {total !== undefined && (
         <p className="text-sm text-ink-500">
-          Page <span className="font-medium text-ink-800">{page}</span> of{' '}
-          <span className="font-medium text-ink-800">{totalPages}</span>
+          {range ? (
+            <>
+              Showing{' '}
+              <span className="font-medium text-ink-800">
+                {range.start}–{range.end}
+              </span>{' '}
+              of <span className="font-medium text-ink-800">{total}</span>{' '}
+              {total === 1 ? 'entry' : 'entries'}
+            </>
+          ) : (
+            <>
+              Page <span className="font-medium text-ink-800">{page}</span> of{' '}
+              <span className="font-medium text-ink-800">{totalPages}</span>
+            </>
+          )}
         </p>
       )}
       <div className="flex items-center gap-1">

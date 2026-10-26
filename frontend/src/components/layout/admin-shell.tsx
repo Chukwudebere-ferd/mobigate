@@ -226,6 +226,12 @@ export function AdminShell() {
 }
 
 function SidebarContent({ applicationsCount }: { applicationsCount?: number }) {
+  const { session, signOut } = useSession()
+  const user = session?.user
+  const displayName = user
+    ? fullName(user.first_name, user.last_name)
+    : 'Administrator'
+  const roleLabel = user?.role === 'super_admin' ? 'Super Admin' : 'State Admin'
   const navItems = React.useMemo(
     () =>
       primaryNav.map((item) =>
@@ -263,7 +269,29 @@ function SidebarContent({ applicationsCount }: { applicationsCount?: number }) {
       </div>
 
       <div className="border-t border-ink-200 p-3">
-        <div className="rounded-lg bg-ink-50 p-3">
+        <div className="flex items-center gap-2.5 rounded-lg border border-ink-200 bg-white p-2.5">
+          <Avatar
+            first={user?.first_name ?? ''}
+            last={user?.last_name ?? ''}
+            size="sm"
+          />
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="truncate text-xs font-semibold text-ink-900">
+              {displayName}
+            </p>
+            <p className="text-2xs text-ink-500">{roleLabel}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            className="rounded-md p-1.5 text-ink-400 transition-colors hover:bg-danger-50 hover:text-danger-600"
+            aria-label="Sign out"
+            title="Sign out"
+          >
+            <LogOut className="size-4" />
+          </button>
+        </div>
+        <div className="mt-2 rounded-lg bg-ink-50 p-3">
           <p className="text-2xs font-semibold text-ink-700">Need help?</p>
           <p className="mt-0.5 text-2xs text-ink-500">
             Contact the platform team for admin access issues.

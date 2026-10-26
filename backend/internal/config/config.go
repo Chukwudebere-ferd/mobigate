@@ -19,9 +19,13 @@ type Config struct {
 	AllowedOrigins []string
 
 	// ByteshipAPIKey authenticates file uploads (photos, staff documents).
-	// Files are stored private and delivered through signed URLs.
-	ByteshipAPIKey string
-	ByteshipBaseURL string
+	// ByteshipVisibility is normally "private", which delivers files through
+	// short-lived signed URLs. Some Byteship plans reject private uploads
+	// (private_uploads_not_available); those deployments can explicitly opt
+	// into "public" for local testing.
+	ByteshipAPIKey     string
+	ByteshipBaseURL    string
+	ByteshipVisibility string
 
 	// SendLiberty delivers transactional email. SendLibertyFrom must use the
 	// display-name format so candidates see the brand, not a relay address:
@@ -54,8 +58,9 @@ func Load() (*Config, error) {
 			",",
 		),
 
-		ByteshipAPIKey:  env("BYTESHIP_API_KEY", ""),
-		ByteshipBaseURL: env("BYTESHIP_BASE_URL", ""), // empty = SDK default
+		ByteshipAPIKey:     env("BYTESHIP_API_KEY", ""),
+		ByteshipBaseURL:    env("BYTESHIP_BASE_URL", ""), // empty = SDK default
+		ByteshipVisibility: env("BYTESHIP_VISIBILITY", "private"),
 
 		SendLibertyAPIKey:  env("SENDLIBERTY_API_KEY", ""),
 		SendLibertyBaseURL: env("SENDLIBERTY_BASE_URL", "https://sendliberty.com"),

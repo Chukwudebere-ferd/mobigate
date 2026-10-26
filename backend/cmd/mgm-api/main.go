@@ -61,10 +61,13 @@ func run() error {
 	st := store.New(pool)
 
 	// File storage for application photos and staff documents. Private
-	// bucket, delivered through signed URLs (README §11.3).
-	fileStore := storage.New(cfg.ByteshipAPIKey, cfg.ByteshipBaseURL)
+	// bucket, delivered through signed URLs (README §11.3). A Byteship plan
+	// without private uploads can opt into public mode for local testing.
+	fileStore := storage.New(cfg.ByteshipAPIKey, cfg.ByteshipBaseURL, cfg.ByteshipVisibility)
 	if !fileStore.Configured() {
 		slog.Warn("BYTESHIP_API_KEY is not set: photo and document uploads will fail")
+	} else if fileStore.Public() {
+		slog.Warn("BYTESHIP_VISIBILITY=public: uploaded documents are publicly readable; use a private-capable Byteship key in production")
 	}
 
 	// Email delivery through SendLiberty. The worker drains the pending
