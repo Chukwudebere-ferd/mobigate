@@ -497,7 +497,7 @@ func (h *Handler) adminCorrectAttendance(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	record, err := h.Store.CorrectAttendance(r.Context(), *scope, adminActorIDOrZero(r), recordID, in)
+	record, err := h.Store.CorrectAttendance(r.Context(), scope, adminActorIDOrZero(r), recordID, in)
 	if err != nil {
 		writeStoreError(w, err, "the record could not be corrected")
 		return
@@ -509,7 +509,8 @@ func (h *Handler) adminCorrectAttendance(w http.ResponseWriter, r *http.Request)
 // It returns a short-lived signed URL rather than proxying bytes: the photo
 // never becomes a stable, guessable link.
 func (h *Handler) adminAttendancePhoto(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.adminScope(w, r); !ok {
+	scope, ok := h.adminScope(w, r)
+	if !ok {
 		return
 	}
 	if h.Storage == nil || !h.Storage.Configured() {
@@ -524,11 +525,7 @@ func (h *Handler) adminAttendancePhoto(w http.ResponseWriter, r *http.Request) {
 
 	var key *string
 	if h.Store != nil {
-		scope, ok := h.adminScope(w, r)
-		if !ok {
-			return
-		}
-		record, err := h.Store.AttendanceRecordByID(r.Context(), *scope, recordID)
+		record, err := h.Store.AttendanceRecordByID(r.Context(), scope, recordID)
 		if err != nil {
 			writeStoreError(w, err, "record not found")
 			return
@@ -595,7 +592,7 @@ func (h *Handler) adminListKiosks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	devices, err := h.Store.ListKioskDevices(r.Context(), *scope)
+	devices, err := h.Store.ListKioskDevices(r.Context(), scope)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not load paired laptops")
 		return
@@ -607,7 +604,7 @@ func (h *Handler) adminListKiosks(w http.ResponseWriter, r *http.Request) {
 // one-time pairing code. The plaintext is returned exactly once; only the
 // hash is stored.
 func (h *Handler) adminPairKiosk(w http.ResponseWriter, r *http.Request) {
-	scope, ok := h.adminScope(w, r)
+	tenantID, ok := h.adminWriteTenant(w, r)
 	if !ok {
 		return
 	}
@@ -630,7 +627,7 @@ func (h *Handler) adminPairKiosk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	device, err := h.Store.PairKiosk(r.Context(), *scope, adminActorID(r),
+	device, err := h.Store.PairKiosk(r.Context(), tenantID, adminActorID(r),
 		req.Label, codes.HashAccessCode(plaintext))
 	if err != nil {
 		writeStoreError(w, err, "the laptop could not be paired")
@@ -653,7 +650,7 @@ func (h *Handler) adminRevokeKiosk(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	device, err := h.Store.RevokeKiosk(r.Context(), *scope, adminActorIDOrZero(r), deviceID)
+	device, err := h.Store.RevokeKiosk(r.Context(), scope, adminActorIDOrZero(r), deviceID)
 	if err != nil {
 		writeStoreError(w, err, "the laptop could not be unpaired")
 		return
@@ -666,11 +663,11 @@ func (h *Handler) adminRevokeKiosk(w http.ResponseWriter, r *http.Request) {
 // adminWorkSite handles GET /admin/settings/work-site: the office hours that
 // decide lateness and early leave.
 func (h *Handler) adminWorkSite(w http.ResponseWriter, r *http.Request) {
-	scope, ok := h.adminScope(w, r)
+	tenantID, ok := h.adminWriteTenant(w, r)
 	if !ok {
 		return
 	}
-	site, err := h.Store.WorkSite(r.Context(), *scope)
+	site, err := h.Store.WorkSite(r.Context(), tenantID)
 	if err != nil {
 		writeStoreError(w, err, "could not load the office settings")
 		return
@@ -681,7 +678,7 @@ func (h *Handler) adminWorkSite(w http.ResponseWriter, r *http.Request) {
 // adminUpdateWorkSite handles PATCH /admin/settings/work-site. The new hours
 // take effect on the next clock event; nothing needs a redeploy.
 func (h *Handler) adminUpdateWorkSite(w http.ResponseWriter, r *http.Request) {
-	scope, ok := h.adminScope(w, r)
+	tenantID, ok := h.adminWriteTenant(w, r)
 	if !ok {
 		return
 	}
@@ -699,7 +696,7 @@ func (h *Handler) adminUpdateWorkSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	site, err := h.Store.UpdateWorkSite(r.Context(), *scope, adminActorID(r),
+	site, err := h.Store.UpdateWorkSite(r.Context(), tenantID, adminActorID(r),
 		store.WorkSiteInput{
 			Name:              req.Name,
 			Address:           req.Address,

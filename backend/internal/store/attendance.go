@@ -438,7 +438,7 @@ func (s *Store) ClockIn(ctx context.Context, in ClockInInput) (models.Attendance
 	if err := tx.Commit(ctx); err != nil {
 		return models.AttendanceRecord{}, err
 	}
-	return s.AttendanceRecordByID(ctx, in.TenantID, recordID)
+	return s.AttendanceRecordByID(ctx, &in.TenantID, recordID)
 }
 
 // ClockOut closes the staff member's open record.
@@ -502,15 +502,17 @@ func (s *Store) ClockOut(ctx context.Context, in ClockOutInput) (models.Attendan
 	if err := tx.Commit(ctx); err != nil {
 		return models.AttendanceRecord{}, err
 	}
-	return s.AttendanceRecordByID(ctx, in.TenantID, recordID)
+	return s.AttendanceRecordByID(ctx, &in.TenantID, recordID)
 }
 
 // -- Reads --------------------------------------------------------------------
 
-// AttendanceRecordByID reads one record inside a tenant scope.
-func (s *Store) AttendanceRecordByID(ctx context.Context, tenantID, recordID uuid.UUID) (models.AttendanceRecord, error) {
+// AttendanceRecordByID reads one record. A nil tenantID reads across every
+// tenant, which is how a super administrator (who has no scope of their own)
+// reaches a record by its id.
+func (s *Store) AttendanceRecordByID(ctx context.Context, tenantID *uuid.UUID, recordID uuid.UUID) (models.AttendanceRecord, error) {
 	record, err := scanAttendance(s.pool.QueryRow(ctx,
-		attendanceSelect+` WHERE a.id = $1 AND a.tenant_id = $2`,
+		attendanceSelect+` WHERE a.id = $1 AND ($2::uuid IS NULL OR a.tenant_id = $2)`,
 		recordID, tenantID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -587,9 +589,14 @@ func (s *Store) ListAttendanceAdmin(ctx context.Context, q AttendanceQuery) ([]m
 
 // CorrectAttendance lets an administrator fix a record and close a forgotten
 // clock-out. The correction is always audited and always carries a note.
+//
+// A nil tenantID corrects across every tenant. The audit row is written under
+// the record's own tenant rather than the caller's scope, so a correction made
+// by a super administrator still lands where the record lives.
 func (s *Store) CorrectAttendance(
 	ctx context.Context,
-	tenantID, actorID, recordID uuid.UUID,
+	tenantID *uuid.UUID,
+	actorID, recordID uuid.UUID,
 	in AttendanceCorrection,
 ) (models.AttendanceRecord, error) {
 	note, err := cleanAttendanceNote(in.Note)
@@ -614,7 +621,7 @@ func (s *Store) CorrectAttendance(
 
 	var before models.AttendanceRecord
 	before, err = scanAttendance(tx.QueryRow(ctx,
-		attendanceSelect+` WHERE a.id = $1 AND a.tenant_id = $2 FOR UPDATE OF a`,
+		attendanceSelect+` WHERE a.id = $1 AND ($2::uuid IS NULL OR a.tenant_id = $2) FOR UPDATE OF a`,
 		recordID, tenantID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -662,14 +669,14 @@ func (s *Store) CorrectAttendance(
 
 	var after models.AttendanceRecord
 	after, err = scanAttendance(tx.QueryRow(ctx,
-		attendanceSelect+` WHERE a.id = $1 AND a.tenant_id = $2`,
+		attendanceSelect+` WHERE a.id = $1 AND ($2::uuid IS NULL OR a.tenant_id = $2)`,
 		recordID, tenantID,
 	))
 	if err != nil {
 		return models.AttendanceRecord{}, err
 	}
 
-	if err := insertAudit(ctx, tx, tenantID, &actorID,
+	if err := insertAudit(ctx, tx, before.TenantID, &actorID,
 		"attendance.corrected", "attendance_record", recordID,
 		map[string]any{
 			"clock_in_at":  before.ClockInAt,
@@ -899,8 +906,9 @@ func (s *Store) ActiveKiosk(ctx context.Context, deviceID uuid.UUID) (models.Kio
 	return device, nil
 }
 
-// ListKioskDevices lists the tenant's paired and pending devices.
-func (s *Store) ListKioskDevices(ctx context.Context, tenantID uuid.UUID) ([]models.KioskDevice, error) {
+// ListKioskDevices lists paired and pending devices. A nil tenantID lists
+// devices across every tenant.
+func (s *Store) ListKioskDevices(ctx context.Context, tenantID *uuid.UUID) ([]models.KioskDevice, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, tenant_id, label, pairing_expires_at, paired_at,
 		       paired_by, expires_at, revoked_at, last_seen_at, created_at
@@ -932,7 +940,10 @@ func (s *Store) ListKioskDevices(ctx context.Context, tenantID uuid.UUID) ([]mod
 
 // RevokeKiosk withdraws a device's authority immediately. The token may
 // still be well-formed; the next request finds this row revoked and stops.
-func (s *Store) RevokeKiosk(ctx context.Context, tenantID, actorID, deviceID uuid.UUID) (models.KioskDevice, error) {
+//
+// A nil tenantID revokes across every tenant. The audit row is written under
+// the device's own tenant for the same reason as CorrectAttendance.
+func (s *Store) RevokeKiosk(ctx context.Context, tenantID *uuid.UUID, actorID, deviceID uuid.UUID) (models.KioskDevice, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return models.KioskDevice{}, err
@@ -943,7 +954,7 @@ func (s *Store) RevokeKiosk(ctx context.Context, tenantID, actorID, deviceID uui
 	err = scanKiosk(tx.QueryRow(ctx, `
 		UPDATE kiosk_devices
 		SET revoked_at = now()
-		WHERE id = $1 AND tenant_id = $2 AND revoked_at IS NULL
+		WHERE id = $1 AND ($2::uuid IS NULL OR tenant_id = $2) AND revoked_at IS NULL
 		RETURNING id, tenant_id, label, pairing_expires_at, paired_at,
 		          paired_by, expires_at, revoked_at, last_seen_at, created_at`,
 		deviceID, tenantID,
@@ -955,7 +966,7 @@ func (s *Store) RevokeKiosk(ctx context.Context, tenantID, actorID, deviceID uui
 		return models.KioskDevice{}, err
 	}
 
-	if err := insertAudit(ctx, tx, tenantID, &actorID,
+	if err := insertAudit(ctx, tx, device.TenantID, &actorID,
 		"attendance.kiosk_revoked", "kiosk_device", deviceID,
 		map[string]any{"label": device.Label}, nil,
 	); err != nil {

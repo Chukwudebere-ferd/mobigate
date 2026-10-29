@@ -297,6 +297,37 @@ func (h *Handler) adminScope(w http.ResponseWriter, r *http.Request) (*uuid.UUID
 	return &tenantID, true
 }
 
+// adminWriteTenant resolves the tenant that a write operation must be filed
+// under. Unlike adminScope it never returns nil: a row that carries a
+// NOT NULL tenant (a paired laptop, an office configuration) has to belong to
+// exactly one tenant.
+//
+// A Super Admin has no scope of their own, so adminScope hands back nil for
+// them. They do carry a tenant on their account, and that is the tenant used
+// here. An administrator with neither is refused rather than allowed to crash
+// the request.
+func (h *Handler) adminWriteTenant(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	scope, ok := h.adminScope(w, r)
+	if !ok {
+		return uuid.Nil, false
+	}
+	if scope != nil {
+		return *scope, true
+	}
+	session, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return uuid.Nil, false
+	}
+	tenantID, err := uuid.Parse(session.User.TenantID)
+	if err != nil {
+		writeError(w, http.StatusForbidden,
+			"this account has no office to save against; ask an administrator to assign one")
+		return uuid.Nil, false
+	}
+	return tenantID, true
+}
+
 // currentUser returns the signed-in user's domain profile and state scope.
 // Better Auth owns the session; this response is the frontend's view of the
 // MGM user, including pending/suspended status.
