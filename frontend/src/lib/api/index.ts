@@ -20,6 +20,8 @@ import type {
   ApplicationEvent,
   ApplicationFilters,
   ApplicationStatus,
+  AttendanceRecord,
+  AttendanceStatus,
   AuditLog,
   DashboardMetrics,
   Department,
@@ -27,6 +29,9 @@ import type {
   InterviewAnnouncement,
   Job,
   JobStatus,
+  KioskDevice,
+  KioskPairing,
+  KioskStaff,
   Location,
   LocationType,
   MessageTemplate,
@@ -47,6 +52,7 @@ import type {
   StaffStatus,
   Tenant,
   User,
+  WorkSite,
 } from '@/types/domain'
 
 // -- Location helpers ------------------------------------------------------
@@ -335,6 +341,14 @@ export const staffApi = {
     reason: string
   }): Promise<AdvanceRequest> {
     return http.post<AdvanceRequest>('/staff/payroll/advances', payload)
+  },
+
+  /**
+   * GET /staff/attendance — the caller's own clock history, newest first.
+   * Read-only by design: clocking happens on the office laptop only.
+   */
+  async attendance(): Promise<{ items: AttendanceRecord[] }> {
+    return http.get<{ items: AttendanceRecord[] }>('/staff/attendance')
   },
 
   /**
@@ -697,6 +711,99 @@ export const adminApi = {
     return http.patch<AdminSettings>('/admin/settings/access-codes', payload)
   },
 
+  // -- Attendance -----------------------------------------------------------
+
+  /**
+   * GET /admin/attendance — the roster, filterable by date, staff member,
+   * status, or the exceptions queue (open records from an earlier day, i.e.
+   * forgotten clock-outs awaiting correction).
+   */
+  async listAttendance(
+    filters: {
+      staff_profile_id?: string
+      status?: AttendanceStatus | 'all'
+      date_from?: string
+      date_to?: string
+      exceptions?: boolean
+      search?: string
+    } = {},
+  ): Promise<AttendanceRecord[]> {
+    const response = await http.get<{ items: AttendanceRecord[] }>(
+      '/admin/attendance',
+      { ...filters },
+    )
+    return response.items
+  },
+
+  /**
+   * PATCH /admin/attendance/{id} — correct a record or close a forgotten
+   * clock-out. A note is required; the change is audited.
+   */
+  async correctAttendance(
+    id: string,
+    payload: {
+      clock_in_at?: string
+      // null and absent mean the same thing to the API: leave that edge
+      // alone. The store only rewrites a timestamp that is actually sent.
+      clock_out_at?: string | null
+      status: AttendanceStatus
+      note: string
+    },
+  ): Promise<AttendanceRecord> {
+    return http.patch<AttendanceRecord>(`/admin/attendance/${id}`, payload)
+  },
+
+  /**
+   * GET /admin/attendance/{id}/photos/{which} — a short-lived signed URL for
+   * a clock-in or clock-out photograph. Photos are admin-only evidence and
+   * are never exposed as a stable link.
+   */
+  async attendancePhotoURL(
+    id: string,
+    which: 'in' | 'out',
+  ): Promise<{ url: string }> {
+    return http.get<{ url: string }>(`/admin/attendance/${id}/photos/${which}`)
+  },
+
+  // -- Office kiosks --------------------------------------------------------
+
+  async listKiosks(): Promise<KioskDevice[]> {
+    const response = await http.get<{ items: KioskDevice[] }>('/admin/kiosk')
+    return response.items
+  },
+
+  /**
+   * POST /admin/kiosk — pair a new office laptop. The returned pairing code
+   * is shown once and is not recoverable afterwards.
+   */
+  async pairKiosk(label: string): Promise<KioskDevice> {
+    return http.post<KioskDevice>('/admin/kiosk', { label })
+  },
+
+  async revokeKiosk(id: string): Promise<KioskDevice> {
+    return http.delete<KioskDevice>(`/admin/kiosk/${id}`)
+  },
+
+  // -- Work site (attendance settings) ---------------------------------------
+
+  /** GET /admin/settings/work-site — the office hours and timezone. */
+  async getWorkSite(): Promise<WorkSite> {
+    return http.get<WorkSite>('/admin/settings/work-site')
+  },
+
+  /** PATCH /admin/settings/work-site — takes effect on the next clock event. */
+  async updateWorkSite(payload: {
+    name: string
+    address?: string | null
+    timezone: string
+    work_start: string
+    work_end: string
+    late_grace_minutes: number
+    early_leave_minutes: number
+  }): Promise<WorkSite> {
+    return http.patch<WorkSite>('/admin/settings/work-site', payload)
+  },
+
   async listNotifications(): Promise<Notification[]> {
     const response = await http.get<{ items: Notification[] }>(
       '/admin/notifications',
@@ -711,6 +818,94 @@ export const adminApi = {
   async listAuditLogs(): Promise<AuditLog[]> {
     const response = await http.get<{ items: AuditLog[] }>('/admin/audit-logs')
     return response.items
+  },
+}
+
+// -- Office kiosk ------------------------------------------------------------
+
+/**
+ * The office laptop's own API surface.
+ *
+ * These routes are deliberately public: the kiosk is a shared device and the
+ * person clocking in is identified by their staff number and photograph, not
+ * by a login. What restricts them to the office is the paired device token,
+ * which the server checks on every clock request. An unpaired phone or
+ * laptop anywhere in the world is rejected before its photograph is accepted.
+ *
+ * The token is stored in this browser's localStorage by the pairing screen
+ * and sent as X-Kiosk-Token. It is a bearer credential for one machine.
+ */
+const KIOSK_TOKEN_KEY = 'mgm.kiosk.token'
+
+export function getKioskToken(): string | null {
+  if (typeof localStorage === 'undefined') return null
+  return localStorage.getItem(KIOSK_TOKEN_KEY)
+}
+
+export function setKioskToken(token: string) {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(KIOSK_TOKEN_KEY, token)
+}
+
+export function clearKioskToken() {
+  if (typeof localStorage === 'undefined') return
+  localStorage.removeItem(KIOSK_TOKEN_KEY)
+}
+
+/** The header every clock request carries, or none if unpaired. */
+function kioskHeaders(): Record<string, string> {
+  const token = getKioskToken()
+  return token ? { 'X-Kiosk-Token': token } : {}
+}
+
+export const kioskApi = {
+  /**
+   * POST /kiosk/pair — trade a one-time pairing code (shown once, by an
+   * administrator in Settings) for this laptop's long-lived token.
+   */
+  async pair(code: string): Promise<KioskPairing> {
+    return http.post<KioskPairing>('/kiosk/pair', { code })
+  },
+
+  /**
+   * POST /kiosk/staff/verify — confirm a typed staff number and return the
+   * name and department, so the person knows it is their record before the
+   * camera opens. Reports an unknown and an inactive number identically, so
+   * the laptop cannot be used to discover which staff numbers exist.
+   */
+  async verifyStaff(staffId: string): Promise<KioskStaff> {
+    return http.post<KioskStaff>(
+      '/kiosk/staff/verify',
+      { staff_id: staffId },
+      kioskHeaders(),
+    )
+  },
+
+  /**
+   * POST /kiosk/clock-in — multipart: the staff profile, the photograph and
+   * the consent flag. 401 means this laptop is no longer authorised.
+   */
+  async clockIn(payload: {
+    staff_profile_id: string
+    photo: Blob
+    consent: boolean
+  }): Promise<AttendanceRecord> {
+    const form = new FormData()
+    form.append('staff_profile_id', payload.staff_profile_id)
+    form.append('photo', payload.photo, 'clock-in.jpg')
+    form.append('consent', payload.consent ? 'true' : 'false')
+    return http.post<AttendanceRecord>('/kiosk/clock-in', form, kioskHeaders())
+  },
+
+  /** POST /kiosk/clock-out — closes the open record. 404 if not clocked in. */
+  async clockOut(payload: {
+    staff_profile_id: string
+    photo: Blob
+  }): Promise<AttendanceRecord> {
+    const form = new FormData()
+    form.append('staff_profile_id', payload.staff_profile_id)
+    form.append('photo', payload.photo, 'clock-out.jpg')
+    return http.post<AttendanceRecord>('/kiosk/clock-out', form, kioskHeaders())
   },
 }
 

@@ -9,8 +9,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Bell,
+  CheckCircle2,
+  Clock,
   FileText,
   KeyRound,
+  Laptop,
   Mail,
   MessageSquare,
   Pencil,
@@ -62,6 +65,7 @@ import {
 } from '@/lib/admin-display'
 import { useSession } from '@/providers/session-provider'
 import type {
+  KioskDeviceStatus,
   MessageTemplate,
   Notification,
   NotificationChannel,
@@ -133,6 +137,7 @@ export function AdminSettingsPage() {
           <TabsTrigger value="display">Display</TabsTrigger>
           <TabsTrigger value="email">Email templates</TabsTrigger>
           <TabsTrigger value="codes">Access code settings</TabsTrigger>
+          <TabsTrigger value="attendance">Attendance</TabsTrigger>
           <TabsTrigger value="policies">Policies</TabsTrigger>
           {isSuperAdmin && (
             <TabsTrigger value="users">Users &amp; admins</TabsTrigger>
@@ -151,6 +156,9 @@ export function AdminSettingsPage() {
         </TabsContent>
         <TabsContent value="codes" className="pt-5">
           <AccessCodeSettings />
+        </TabsContent>
+        <TabsContent value="attendance" className="space-y-5 pt-5">
+          <AttendanceSettings />
         </TabsContent>
         <TabsContent value="policies" className="pt-5">
           <PoliciesPanel />
@@ -1035,6 +1043,534 @@ function AccessCodeSettings() {
       </CardContent>
     </Card>
   )
+}
+
+/* -- Attendance ----------------------------------------------------------- */
+
+/**
+ * Office hours and office laptops.
+ *
+ * Two unrelated controls that both belong under "attendance": the hours that
+ * decide whether someone was late, and the laptops allowed to record a clock
+ * event at all. Both are editable here without a deploy — the hours are read
+ * on every clock event, and device validity is decided by the database row
+ * rather than the token, so a revocation takes effect on the very next
+ * request.
+ *
+ * The pairing code is the one secret in this panel. It is shown exactly
+ * once, at issue time, and cannot be retrieved again; the laptop trades it
+ * for a 90-day token on the kiosk screen.
+ */
+function AttendanceSettings() {
+  return (
+    <div className="space-y-5">
+      <WorkSiteCard />
+      <KioskDevicesCard />
+    </div>
+  )
+}
+
+function WorkSiteCard() {
+  const queryClient = useQueryClient()
+  const siteQuery = useQuery({
+    queryKey: ['admin', 'work-site'],
+    queryFn: () => adminApi.getWorkSite(),
+    retry: false,
+  })
+
+  const site = siteQuery.data
+  const [draft, setDraft] = React.useState<{
+    name: string
+    address: string
+    timezone: string
+    work_start: string
+    work_end: string
+    late_grace_minutes: number
+    early_leave_minutes: number
+  } | null>(null)
+
+  // Seed the form once the row loads, and again whenever it is re-fetched,
+  // so the inputs track the server rather than a stale local copy.
+  React.useEffect(() => {
+    if (!site) return
+    setDraft({
+      name: site.name,
+      address: site.address ?? '',
+      timezone: site.timezone,
+      work_start: site.work_start,
+      work_end: site.work_end,
+      late_grace_minutes: site.late_grace_minutes,
+      early_leave_minutes: site.early_leave_minutes,
+    })
+  }, [site])
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      if (!draft) throw new Error('no changes')
+      return adminApi.updateWorkSite({
+        name: draft.name.trim(),
+        address: draft.address.trim() || null,
+        timezone: draft.timezone,
+        work_start: draft.work_start,
+        work_end: draft.work_end,
+        late_grace_minutes: draft.late_grace_minutes,
+        early_leave_minutes: draft.early_leave_minutes,
+      })
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['admin', 'work-site'], updated)
+      toast.success('Office hours saved. The next clock event uses them.')
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not save the hours.',
+      )
+    },
+  })
+
+  if (siteQuery.isLoading) {
+    return (
+      <div className="rounded-xl border border-ink-200 bg-white shadow-xs">
+        <TableSkeleton rows={3} />
+      </div>
+    )
+  }
+
+  if (siteQuery.isError || !site || !draft) {
+    return (
+      <EmptyState
+        icon={Clock}
+        title="Office hours could not be loaded"
+        description={
+          siteQuery.error instanceof Error
+            ? siteQuery.error.message
+            : 'Try again in a moment.'
+        }
+      />
+    )
+  }
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify({
+    name: site.name,
+    address: site.address ?? '',
+    timezone: site.timezone,
+    work_start: site.work_start,
+    work_end: site.work_end,
+    late_grace_minutes: site.late_grace_minutes,
+    early_leave_minutes: site.early_leave_minutes,
+  })
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Clock className="size-4 text-ink-400" aria-hidden />
+          Office hours
+        </CardTitle>
+        <p className="mt-1 text-sm text-ink-500">
+          These decide whether a clock-in is late and a clock-out is early.
+          Changing them applies to the next clock event — no restart needed.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Office name" htmlFor="ws-name" required>
+            <Input
+              id="ws-name"
+              value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            />
+          </Field>
+          <Field
+            label="Timezone"
+            htmlFor="ws-tz"
+            hint="Times are stored in UTC and shown in this zone."
+          >
+            <Input
+              id="ws-tz"
+              value={draft.timezone}
+              onChange={(e) => setDraft({ ...draft, timezone: e.target.value })}
+              placeholder="Africa/Lagos"
+            />
+          </Field>
+          <Field
+            label="Address (optional)"
+            htmlFor="ws-address"
+            className="sm:col-span-2"
+          >
+            <Input
+              id="ws-address"
+              value={draft.address}
+              onChange={(e) => setDraft({ ...draft, address: e.target.value })}
+            />
+          </Field>
+          <Field label="Work starts" htmlFor="ws-start" required>
+            <Input
+              id="ws-start"
+              type="time"
+              value={draft.work_start}
+              onChange={(e) =>
+                setDraft({ ...draft, work_start: e.target.value })
+              }
+            />
+          </Field>
+          <Field label="Work ends" htmlFor="ws-end" required>
+            <Input
+              id="ws-end"
+              type="time"
+              value={draft.work_end}
+              onChange={(e) => setDraft({ ...draft, work_end: e.target.value })}
+            />
+          </Field>
+          <Field
+            label="Late grace (minutes)"
+            htmlFor="ws-late"
+            hint="Arriving within this window is not marked late."
+          >
+            <Input
+              id="ws-late"
+              type="number"
+              min={0}
+              max={120}
+              value={draft.late_grace_minutes}
+              onChange={(e) =>
+                setDraft({ ...draft, late_grace_minutes: Number(e.target.value) })
+              }
+            />
+          </Field>
+          <Field
+            label="Early-leave grace (minutes)"
+            htmlFor="ws-early"
+            hint="Leaving within this window is not marked early."
+          >
+            <Input
+              id="ws-early"
+              type="number"
+              min={0}
+              max={120}
+              value={draft.early_leave_minutes}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  early_leave_minutes: Number(e.target.value),
+                })
+              }
+            />
+          </Field>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <Button
+            variant="primary"
+            disabled={!dirty}
+            loading={saveMutation.isPending}
+            loadingText="Saving…"
+            onClick={() => saveMutation.mutate()}
+          >
+            Save office hours
+          </Button>
+          {dirty && (
+            <p className="text-xs text-warning-700">
+              Unsaved changes. Lateness is recalculated on the next clock-in.
+            </p>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function KioskDevicesCard() {
+  const queryClient = useQueryClient()
+  const devicesQuery = useQuery({
+    queryKey: ['admin', 'kiosk'],
+    queryFn: () => adminApi.listKiosks(),
+    retry: false,
+  })
+
+  // The pairing code is shown once, here, and never again: only its hash is
+  // stored. It lives in component state, not in the query cache, so a
+  // refetch cannot resurrect it.
+  const [issued, setIssued] = React.useState<{
+    label: string
+    code: string
+  } | null>(null)
+  const [newLabel, setNewLabel] = React.useState('')
+  const [confirmRevoke, setConfirmRevoke] = React.useState<{
+    id: string
+    label: string
+  } | null>(null)
+
+  const pairMutation = useMutation({
+    mutationFn: () => adminApi.pairKiosk(newLabel.trim() || 'Office laptop'),
+    onSuccess: (device) => {
+      setIssued({
+        label: device.label,
+        code: device.pairing_code ?? '',
+      })
+      setNewLabel('')
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'kiosk'] })
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not pair the laptop.',
+      )
+    },
+  })
+
+  const revokeMutation = useMutation({
+    mutationFn: (id: string) => adminApi.revokeKiosk(id),
+    onSuccess: () => {
+      toast.success('Laptop unpaired. It can no longer record attendance.')
+      setConfirmRevoke(null)
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'kiosk'] })
+    },
+    onError: (error: unknown) => {
+      toast.error(
+        error instanceof Error ? error.message : 'Could not unpair the laptop.',
+      )
+    },
+  })
+
+  const devices = devicesQuery.data ?? []
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Laptop className="size-4 text-ink-400" aria-hidden />
+          Office laptops
+        </CardTitle>
+        <p className="mt-1 text-sm text-ink-500">
+          Attendance can only be recorded from a paired office laptop. Pair the
+          office machine once, then enter the code on its attendance screen.
+          Unpairing takes effect on the very next request.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {/* -- Pair a new laptop -- */}
+        <div className="rounded-xl border border-ink-200 bg-ink-50/60 p-4">
+          <p className="text-sm font-semibold text-ink-900">
+            Pair a new laptop
+          </p>
+          <p className="mt-1 text-xs text-ink-500">
+            Give it a name you will recognise later, like “Reception laptop”.
+            The pairing code is shown once and cannot be retrieved again.
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <Field label="Label" htmlFor="kiosk-label" className="min-w-52">
+              <Input
+                id="kiosk-label"
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                placeholder="Office laptop"
+                maxLength={80}
+              />
+            </Field>
+            <Button
+              variant="primary"
+              loading={pairMutation.isPending}
+              onClick={() => pairMutation.mutate()}
+            >
+              <Plus />
+              Generate pairing code
+            </Button>
+          </div>
+        </div>
+
+        {/* -- Shown exactly once -- */}
+        {issued && (
+          <div className="rounded-xl border border-success-200 bg-success-50/70 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="flex items-center gap-1.5 text-sm font-semibold text-success-900">
+                  <CheckCircle2 className="size-4" aria-hidden />
+                  Pairing code for {issued.label}
+                </p>
+                <p className="mt-1 text-xs text-success-800">
+                  On the laptop, open the attendance screen and enter this code.
+                  It expires in 15 minutes. You will not be able to see it
+                  again — generate a new one if it is lost.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIssued(null)}
+                aria-label="Dismiss the pairing code"
+                className="rounded-md px-2 py-1 text-xs font-medium text-success-800 hover:bg-success-100"
+              >
+                Dismiss
+              </button>
+            </div>
+            <p className="mt-3 break-all rounded-lg bg-white px-4 py-3 text-center font-mono text-2xl font-bold tracking-[0.3em] text-ink-950 ring-1 ring-success-200 select-all">
+              {issued.code || '—'}
+            </p>
+          </div>
+        )}
+
+        {/* -- Device list -- */}
+        {devicesQuery.isLoading ? (
+          <TableSkeleton rows={3} />
+        ) : devicesQuery.isError ? (
+          <EmptyState
+            icon={Laptop}
+            title="Paired laptops could not be loaded"
+            description={
+              devicesQuery.error instanceof Error
+                ? devicesQuery.error.message
+                : 'Try again in a moment.'
+            }
+          />
+        ) : devices.length === 0 ? (
+          <EmptyState
+            icon={Laptop}
+            title="No laptops paired yet"
+            description="Generate a pairing code above, then enter it on the office laptop's attendance screen."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Laptop</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Paired</TableHead>
+                  <TableHead>Token expires</TableHead>
+                  <TableHead>Last seen</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {devices.map((device) => (
+                  <TableRow key={device.id}>
+                    <TableCell>
+                      <p className="font-medium text-ink-900">
+                        {device.label}
+                      </p>
+                    </TableCell>
+                    <TableCell>
+                      <KioskStatusBadge status={device.status} />
+                    </TableCell>
+                    <TableCell className="text-ink-600">
+                      {device.paired_at ? formatDate(device.paired_at) : '—'}
+                    </TableCell>
+                    <TableCell className="text-ink-600">
+                      {formatDate(device.expires_at)}
+                    </TableCell>
+                    <TableCell className="text-ink-500">
+                      {device.last_seen_at
+                        ? formatDateTime(device.last_seen_at)
+                        : 'Never'}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end">
+                        {device.status === 'revoked' ? (
+                          <p className="text-xs text-ink-400">
+                            Unpaired
+                          </p>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="danger-outline"
+                            onClick={() =>
+                              setConfirmRevoke({
+                                id: device.id,
+                                label: device.label,
+                              })
+                            }
+                          >
+                            <Trash2 />
+                            Unpair
+                          </Button>
+                        )}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+
+        <div className="rounded-lg border border-ink-200 bg-ink-50/70 p-3">
+          <p className="text-2xs font-medium tracking-wide text-ink-500 uppercase">
+            How clocking stays in the office
+          </p>
+          <p className="mt-1.5 text-sm text-ink-800">
+            Each paired laptop holds a signed token that names its record in
+            the database. The server checks that record on every clock event,
+            so a revoked or expired laptop is refused immediately — even if it
+            still has a valid-looking token. Staff can view their own history
+            from anywhere, but only a paired laptop can record attendance.
+          </p>
+        </div>
+      </CardContent>
+
+      <Dialog
+        open={confirmRevoke !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmRevoke(null)
+        }}
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle>Unpair this laptop?</DialogTitle>
+            <DialogDescription>
+              {confirmRevoke?.label} will stop recording attendance straight
+              away. You can pair it again later with a new code.
+            </DialogDescription>
+          </div>
+        </DialogHeader>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => setConfirmRevoke(null)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            variant="danger"
+            loading={revokeMutation.isPending}
+            onClick={() => {
+              if (confirmRevoke) revokeMutation.mutate(confirmRevoke.id)
+            }}
+          >
+            <Trash2 />
+            Unpair
+          </Button>
+        </DialogFooter>
+      </Dialog>
+    </Card>
+  )
+}
+
+function KioskStatusBadge({ status }: { status: KioskDeviceStatus }) {
+  switch (status) {
+    case 'active':
+      return (
+        <Badge variant="success" dot>
+          Active
+        </Badge>
+      )
+    case 'pending':
+      return (
+        <Badge variant="warning" dot>
+          Waiting to pair
+        </Badge>
+      )
+    case 'expired':
+      return (
+        <Badge variant="neutral" dot>
+          Expired
+        </Badge>
+      )
+    case 'revoked':
+      return (
+        <Badge variant="danger" dot>
+          Unpaired
+        </Badge>
+      )
+    default:
+      return <Badge variant="neutral">{status}</Badge>
+  }
 }
 
 /* -- Users & admins ------------------------------------------------------ */

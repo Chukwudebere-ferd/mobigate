@@ -1,5 +1,6 @@
 import {
   Briefcase,
+  CalendarCheck2,
   CalendarClock,
   KeyRound,
   LayoutDashboard,
@@ -39,6 +40,7 @@ const primaryNav: NavItem[] = [
   { to: '/admin/access-codes', label: 'Access Codes', icon: KeyRound },
   { to: '/admin/staff', label: 'Staff', icon: Users },
   { to: '/admin/payroll', label: 'Payroll', icon: Wallet },
+  { to: '/admin/attendance', label: 'Attendance', icon: CalendarCheck2 },
   { to: '/admin/locations', label: 'Locations', icon: MapPin },
 ]
 

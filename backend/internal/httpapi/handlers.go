@@ -45,6 +45,11 @@ type Handler struct {
 	// redeemAttempts throttles code redemption per IP, the backstop against
 	// guessing before a code row exists to lock (BR-06).
 	redeemAttempts *attemptLimiter
+
+	// kioskAttempts throttles the public office-kiosk routes per IP. The
+	// pairing code is the real secret; this is the backstop against guessing
+	// it, and against brute-forcing staff numbers through the lookup route.
+	kioskAttempts *attemptLimiter
 }
 
 // Register mounts every MVP route on the given router.
@@ -79,6 +84,18 @@ func (h *Handler) Register(r chi.Router) {
 		r.Get("/interviews", h.myInterviews)
 	})
 
+	// The office kiosk. Deliberately session-free: the laptop is a shared
+	// device and the person clocking in is identified by their staff number
+	// and photograph, not by a login. Access is controlled by the paired
+	// device token instead, which is what makes "office laptop only" a rule
+	// the server enforces rather than a request the browser may ignore.
+	r.Route("/kiosk", func(r chi.Router) {
+		r.Post("/pair", h.kioskPair)
+		r.Post("/staff/verify", h.kioskVerifyStaff)
+		r.Post("/clock-in", h.kioskClockIn)
+		r.Post("/clock-out", h.kioskClockOut)
+	})
+
 	r.Route("/staff", func(r chi.Router) {
 		// Onboarding starts with an admin-issued code. Applicants redeem it
 		// before completing the form promotes them to the staff role.
@@ -99,6 +116,10 @@ func (h *Handler) Register(r chi.Router) {
 			r.Get("/payroll", h.staffPayroll)
 			r.Post("/payroll/advances", h.requestAdvance)
 			r.Get("/documents/{id}", h.staffDocumentURL)
+			// Read-only own history. Clocking happens on the office laptop,
+			// never from a personal device, so there is deliberately no
+			// write route behind a staff session.
+			r.Get("/attendance", h.staffAttendance)
 		})
 	})
 
@@ -203,6 +224,23 @@ func (h *Handler) registerAdminRoutes(r chi.Router) {
 	r.Post("/payroll/salary", h.upsertSalaryPayment)
 	r.Get("/payroll/advances", h.listAdvanceRequests)
 	r.Patch("/payroll/advances/{id}", h.decideAdvanceRequest)
+
+	// Attendance: the daily roster, the exceptions queue (open records from
+	// an earlier day, i.e. forgotten clock-outs), photo evidence and manual
+	// corrections. Corrections always require a note and are audited.
+	r.Get("/attendance", h.adminAttendance)
+	r.Patch("/attendance/{id}", h.adminCorrectAttendance)
+	r.Get("/attendance/{id}/photos/{which}", h.adminAttendancePhoto)
+
+	// Office laptops authorised to record clock events.
+	r.Get("/kiosk", h.adminListKiosks)
+	r.Post("/kiosk", h.adminPairKiosk)
+	r.Delete("/kiosk/{id}", h.adminRevokeKiosk)
+
+	// Office hours that decide lateness and early leave. Editable here so a
+	// change takes effect on the next clock event without a redeploy.
+	r.Get("/settings/work-site", h.adminWorkSite)
+	r.Patch("/settings/work-site", h.adminUpdateWorkSite)
 
 	r.Get("/locations", h.listLocations)
 	r.Post("/locations", h.createLocation)

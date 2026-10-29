@@ -1,6 +1,7 @@
 import {
   Banknote,
   Briefcase,
+  CalendarCheck2,
   IdCard,
   LayoutDashboard,
   LogOut,
@@ -17,6 +18,7 @@ import type { Session } from '@/types/domain'
 
 const staffNavItems = [
   { to: '/staff', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/staff/attendance', label: 'Attendance', icon: CalendarCheck2, end: false },
   { to: '/staff/payroll', label: 'Payroll', icon: Banknote, end: false },
   { to: '/staff/onboarding', label: 'Onboarding', icon: IdCard, end: false },
 ]
@@ -28,6 +30,7 @@ const onboardingNavItems = [
 
 function pageLabel(pathname: string) {
   if (pathname.startsWith('/staff/onboarding')) return 'Onboarding'
+  if (pathname.startsWith('/staff/attendance')) return 'Attendance'
   if (pathname.startsWith('/staff/payroll')) return 'Payroll'
   return 'Overview'
 }

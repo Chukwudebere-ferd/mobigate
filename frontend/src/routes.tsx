@@ -7,6 +7,7 @@ import { PublicShell } from '@/components/layout/public-shell'
 
 import { AdminAccessCodesPage } from '@/pages/admin/access-codes'
 import { AdminApplicationsPage } from '@/pages/admin/applications'
+import { AdminAttendancePage } from '@/pages/admin/attendance'
 import { AdminAuditPage } from '@/pages/admin/audit'
 import { AdminDashboardPage } from '@/pages/admin/dashboard'
 import { AdminInterviewsPage } from '@/pages/admin/interviews'
@@ -35,9 +36,12 @@ import { ApplyPage } from '@/pages/public/apply'
 import { ApplicationReceivedPage } from '@/pages/public/received'
 
 import { StaffLayout } from '@/pages/staff/layout'
+import { StaffAttendancePage } from '@/pages/staff/attendance'
 import { StaffOnboardingPage } from '@/pages/staff/onboarding'
 import { StaffPayrollPage } from '@/pages/staff/payroll'
 import { StaffPortalPage } from '@/pages/staff/portal'
+
+import { KioskPage } from '@/pages/kiosk/kiosk'
 
 import { NotFoundPage } from '@/pages/not-found'
 import { PreviewPage } from '@/pages/preview'
@@ -59,6 +63,14 @@ export const routes = [
   { path: '/signup', element: <SignupPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
   { path: '/reset-password', element: <ResetPasswordPage /> },
+
+  // -- Office attendance kiosk ---------------------------------------------
+  // Deliberately public and outside every shell: the kiosk is a shared
+  // office machine, and the person clocking in is identified by their staff
+  // number and photograph rather than by a login. The server still refuses
+  // any clock request that does not carry a paired laptop's token, so a
+  // personal device that reaches this URL can look but cannot record.
+  { path: '/kiosk', element: <KioskPage /> },
 
   // -- Public site ---------------------------------------------------------
   {
@@ -124,6 +136,10 @@ export const routes = [
     children: [
       { path: '/staff', element: <StaffPortalPage /> },
       { path: '/staff/payroll', element: <StaffPayrollPage /> },
+      // Own history, viewable from anywhere. Read-only: there is no write
+      // route behind a staff session, because clocking only happens on the
+      // paired office laptop.
+      { path: '/staff/attendance', element: <StaffAttendancePage /> },
     ],
   },
 
@@ -143,6 +159,7 @@ export const routes = [
       { path: '/admin/access-codes', element: <AdminAccessCodesPage /> },
       { path: '/admin/staff', element: <AdminStaffPage /> },
       { path: '/admin/payroll', element: <AdminPayrollPage /> },
+      { path: '/admin/attendance', element: <AdminAttendancePage /> },
       { path: '/admin/locations', element: <AdminLocationsPage /> },
       { path: '/admin/settings', element: <AdminSettingsPage /> },
       { path: '/admin/audit', element: <AdminAuditPage /> },

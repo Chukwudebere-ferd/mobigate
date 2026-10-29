@@ -298,6 +298,120 @@ export interface StaffPayrollResponse {
   advance_requests: AdvanceRequest[]
 }
 
+// -- Attendance -------------------------------------------------------------
+
+/**
+ * The clock state of one attendance record.
+ *
+ * Deliberately only two values. "Needs attention" is derived from a record's
+ * age rather than stored, so an open record can never be in a state that
+ * escapes the one-open-record-per-staff rule.
+ */
+export const ATTENDANCE_STATUSES = ['open', 'closed'] as const
+export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number]
+
+export const KIOSK_DEVICE_STATUSES = [
+  'pending',
+  'active',
+  'expired',
+  'revoked',
+] as const
+export type KioskDeviceStatus = (typeof KIOSK_DEVICE_STATUSES)[number]
+
+/** One clock-in and its matching clock-out, if any. */
+export interface AttendanceRecord {
+  id: string
+  tenant_id: string
+  staff_profile_id: string
+  work_site_id: string
+  status: AttendanceStatus
+
+  /** Always present. The server clock is the only clock that is trusted. */
+  clock_in_at: string
+  clock_in_photo_key: string | null
+  clock_in_ip: string | null
+  clock_in_device_id: string | null
+
+  /** Null until the record is closed. */
+  clock_out_at: string | null
+  clock_out_photo_key: string | null
+  clock_out_ip: string | null
+  clock_out_device_id: string | null
+
+  late_minutes: number
+  early_minutes: number
+
+  note: string | null
+  corrected_by: string | null
+  corrected_at: string | null
+  consent_at: string | null
+  created_at: string
+  updated_at: string
+
+  // Derived for display; not columns on attendance_records.
+  staff_id: string
+  staff_name: string
+  department_name: string | null
+  work_site_name: string
+  /** An open record from an earlier day: a forgotten clock-out. */
+  needs_attention: boolean
+  hours_worked_minutes: number
+}
+
+/**
+ * The identity the office laptop confirms before the camera opens. Carries
+ * name and department only — nothing confidential crosses the public route.
+ */
+export interface KioskStaff {
+  staff_profile_id: string
+  staff_id: string
+  first_name: string
+  last_name: string
+  department_name: string | null
+  position: string | null
+  open_record_id: string | null
+  is_clocked_in: boolean
+}
+
+/** The single office whose hours define lateness and early leave. */
+export interface WorkSite {
+  id: string
+  tenant_id: string
+  name: string
+  address: string | null
+  /** IANA name, e.g. Africa/Lagos. Timestamps are stored in UTC. */
+  timezone: string
+  /** "HH:MM" in the site timezone. */
+  work_start: string
+  work_end: string
+  late_grace_minutes: number
+  early_leave_minutes: number
+  updated_at: string
+}
+
+export interface KioskDevice {
+  id: string
+  tenant_id: string
+  label: string
+  /** Returned exactly once, when the laptop is paired. Never recoverable. */
+  pairing_code?: string
+  pairing_expires_at: string | null
+  paired_at: string | null
+  paired_by: string | null
+  expires_at: string
+  revoked_at: string | null
+  last_seen_at: string | null
+  created_at: string
+  status: KioskDeviceStatus
+}
+
+/** Response from POST /kiosk/pair, holding this laptop's long-lived token. */
+export interface KioskPairing {
+  token: string
+  expires_at: string
+  device: KioskDevice
+}
+
 export interface Department {
   id: string
   tenant_id: string

@@ -101,6 +101,10 @@ func run() error {
 	}
 	// Per-IP throttle on code redemption; BR-06 locks the code itself.
 	handler.InitRedeemLimiter(10, 15*time.Minute)
+	// Per-IP throttle on the public kiosk routes. The pairing code is the
+	// real secret here; the limiter is the backstop against guessing it, and
+	// against brute-forcing staff numbers through the lookup route.
+	handler.InitKioskLimiter(20, 15*time.Minute)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
